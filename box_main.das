@@ -4,12 +4,18 @@ require tiles
 options debugger            // uncomment for debug in VS Code
 require daslib/debug        // uncomment for debug in VS Code
 
+// tweakable settings
+var rain_percent = 0.0
+var wheat_grow_timer = 0.0
+var wheat_grow_period = 5.0
+var draw_grid = false
+var map_size = int2(20,20)
+var npcCount = 10
+
+
 var pieces : ImageHandle
 var tiles : ImageHandle
 
-
-var proj : float4x4
-var proj_view : float4x4
 var grid_ground = new Grid()
 var grid_ground_decals = new Grid()
 var grid_items = new Grid()
@@ -29,9 +35,8 @@ var aiCharacters : array<AiCharacter?>
 let max_health = 6
 let max_hunger = 6
 
-var rain_percent = 1.0
-var wheat_grow_timer = 0.0
-var wheat_grow_period = 5.0
+var map_size_f = float2(float(map_size.x),float(map_size.y))
+var seed : int4
 
 class Character
     position : float2
@@ -69,9 +74,6 @@ class Player : Character
 class AiCharacter : Character
     target_position : float2
 
-var map_size = int2(20,20)
-var map_size_f = float2(float(map_size.x),float(map_size.y))
-var seed : int4
 
 // 'initialize' runs once when game starts and every hot-reload
 [export]
@@ -151,7 +153,6 @@ def initialize
 
     push(characters, player)
 
-    var npcCount = 10
     for i in range(0, npcCount)
         var npc = new AiCharacter()
         npc.position = float2(random_float(seed) * float(map_size.x), random_float(seed) * float(map_size.y))
@@ -168,10 +169,6 @@ def initialize
 
         push(characters, npc)
         push(aiCharacters, npc)
-
-    return
-
-var x = 3
 
 class Camera
     position : float2
@@ -202,17 +199,14 @@ def clampLength(vec : float2; maxLength : float) : float2
     var len = length(vec)
     if len <= maxLength
         return vec
-    
     return vec / len * maxLength
 
 def is_ground_prepared1(pos : int2) : bool
     var groundTile = grid_ground->getTileInt(pos)
-
     return groundTile.kind == TileKind SOIL
 
 def is_ground_prepared2(pos : int2) : bool
     var decalsTile = grid_ground_decals->getTileInt(pos)
-
     return decalsTile.kind == TileKind DECAL_PREPARED_SOIL
 
 def prepare_ground_for_seeds1(pos : int2)
@@ -246,6 +240,7 @@ def plant_seeds(pos : int2)
     tile.kind = TileKind PLANTED_SEEDS
     grid_items->setTile(tile)
     player.items[TileKind WHEAT_FULL] -= 1
+
 def open_chest(var chest : Tile)
     if random_float(seed) > 0.5
         player.health = min(player.health + 1, max_health)
@@ -493,63 +488,7 @@ def act(dt: float)
 
             grid_items->setTile(tile)
 
-
-    return
-
-def world_to_clip(pos : float3) : float4
-    var pos4 = float4(pos.x,pos.y,pos.z,1f)
-    var clip_space_pos = proj_view * pos4
-    clip_space_pos.w = 1f
-    clip_space_pos = clip_space_pos / clip_space_pos.z
-    return clip_space_pos
-
-def draw_king(pos : float4)
-    var texture_rect = float4(0,0,240,240)
-    var color = 0xffffffff
-    var size = float2(12f,12f)
-    var pi = 3.1415
-
-    var clip_space_pos = pos
-
-    size = size * clip_space_pos.w * -20f
-
-    draw_image_transformed(pieces, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, 0f, 0.5f,0.5f)
-
-    pass
-
-def sphere(count : int; var arr : array<float4>)
-    var phi = PI * (1.0 - sqrt(5.0))
-    var radius = 10f
-    for i in range(0, count+1)
-        var t = float(i) / float(count)
-        
-        var y = 1.0 - t * 2.0
-        var r = sqrt(1.0 - y*y)
-        var theta = phi * float(i)
-        var x = r * sin(theta)
-        var z = r * cos(theta)
-
-        push_clone(arr, world_to_clip(float3(x,y,z) * radius))
-    pass
-
-def cube(count : int; var arr : array<float4>)
-    var radius = 4f / sqrt(3f)
-    var halfSize = ceili(sqrt(float(count) / 6f)) / 2
-    for x in range(-halfSize, halfSize+1)
-        for y in range(-halfSize, halfSize+1)
-            for z in range(-halfSize, halfSize+1)
-                if abs(x) == halfSize || abs(y) == halfSize || abs(z) == halfSize
-                    push_clone(arr, world_to_clip(float3(x,y,z) * radius / float(halfSize)))
-        pass
-
-
-
-// var cameraScale : float
-// var cameraOffset : float2
-
 def get_tile_texture_rect(kind : TileKind) : float4
-    var tileSizeX = 18
-    var tileSizeY = 28
     var x = 1
     var y = 0 
     if kind == TileKind GRASS
@@ -640,7 +579,7 @@ def get_tile_texture_rect(kind : TileKind) : float4
         x = 15
         y = 5
 
-    return float4(x*tileSizeX,y*tileSizeY,tileSizeX,tileSizeY)
+    return float4(float(x)*tileSizeX,float(y)*tileSizeY,tileSizeX,tileSizeY)
 
 def processCollisionCircle(var deltaPos : float2&; radius : float)
     var deltaPosIso = float2(deltaPos.x, deltaPos.y * topDownYToY)
@@ -675,12 +614,8 @@ def processCollisionRect(var deltaPos : float2&; halfSizeX : float; halfSizeY : 
             deltaDelta *= 1.01
             if abs(deltaDelta.x) > abs(deltaDelta.y)
                 deltaPos.y += deltaDelta.y
-
-                //deltaPos.x += sign(deltaDelta.x) * max(0.05, abs(deltaDelta.x)) * 0.1
             else
                 deltaPos.x += deltaDelta.x
-
-                //deltaPos.y += sign(deltaDelta.y) * max(0.05, abs(deltaDelta.y)) * 0.1
 
 
 def processCollision(var charPos : float2&; tile : Tile)
@@ -832,7 +767,7 @@ def draw_ui()
     var hunger = player.hunger
     var texture_rect : float4 
     var color = 0xffffffff
-    var size = float2(18.0,28.0) * 3.0
+    var size = float2(tileSizeX,tileSizeY) * 3.0
     var time = get_time_after_start()
 
     //health
@@ -872,6 +807,7 @@ def draw_ui()
 
 var camFSizeX = 12.0
 var camFSizeY = 10.0
+
 def is_culled(pos : float2) : bool
     return abs(camera.position.x - pos.x) > camFSizeX || abs(camera.position.y - pos.y) > camFSizeY
 
@@ -880,9 +816,7 @@ def is_culled(pos : int2) : bool
 
 [export]
 def draw
-    var draw_grid = false
 
-    proj = persp_forward(300f, 300f, 0.5, 100f)
     clear(drawTilesQueue)
     enable_alpha_blend()
     fill_rect(0, 0, get_screen_width(), get_screen_height(), 0xff204020)
@@ -932,31 +866,3 @@ def draw
         draw_grid(0x08ffffff)
 
     draw_ui()
-    // var rotationSpeed = 1f
-    // var lookRotation = un_quat_from_unit_vec_ang(float3(0f,1f,0f), rotationSpeed * time)
-    // var distanceFromCenter = 20f
-    // var view = compose(float4(quat_mul_vec(lookRotation, float3(0f,0f,distanceFromCenter)),1f), lookRotation, float4(1,1,1,1)) 
-    // view = inverse(view)
-
-    // var width = get_screen_width()
-    // var height = get_screen_height()
-    // var proj_to_screen = compose(float4(float(width)/2f, float(height)/2f, 0f,1f), float4(0f,0f,0f,1f), float4(1f,1f,1f,1f))
-    // identity(proj_to_screen)
-    // proj_to_screen[3][0]=float(get_screen_width())/2f
-    // proj_to_screen[3][1]=float(get_screen_height())/2f
-    // proj_view = proj_to_screen * proj * view
-
-    // enable_alpha_blend()
-    // get_time_after_start()
-
-    // var screenSpacePoints : array<float4>
-
-    // sphere(500, screenSpacePoints)
-    // cube(200, screenSpacePoints)
-
-    // sort(screenSpacePoints, $(a,b)=>a.w>b.w)
-    // for pos in screenSpacePoints
-    //     draw_king(pos)
-
-        
-    return
