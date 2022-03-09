@@ -15,6 +15,9 @@ var grid_ground_decals = new Grid()
 var grid_items = new Grid()
 var player = new Player()
 
+var tileSizeY = 28.0
+var tileSizeX = 18.0
+
 var tileFloorSizeX = 18.0
 var tileFloorSizeY = 14.0
 var tileFloorHeightZ = 9.0
@@ -27,6 +30,8 @@ let max_health = 6
 let max_hunger = 6
 
 var rain_percent = 1.0
+var wheat_grow_timer = 0.0
+var wheat_grow_period = 5.0
 
 class Character
     position : float2
@@ -37,6 +42,7 @@ class Character
     health : int = 3
     hunger : int = 3
     isRunning : bool = false
+    items : table<TileKind; int> 
 
 class Player : Character
     speed2 : float
@@ -44,7 +50,7 @@ class Player : Character
 class AiCharacter : Character
     target_position : float2
 
-var map_size = int2(50,50)
+var map_size = int2(100,100)
 var map_size_f = float2(float(map_size.x),float(map_size.y))
 var seed : int4
 
@@ -104,6 +110,8 @@ def initialize
                 if random_float(seed) > 0.8
                     //item_tile.z -= 6.0 / tileFloorHeightZ
                     item_tile.kind = TileKind CHEST_IRON
+                elif random_float(seed) > 0.95
+                    item_tile.kind = TileKind WHEAT_FULL
 
             push_clone(grid_items.tiles, item_tile)
 
@@ -176,29 +184,123 @@ def clampLength(vec : float2; maxLength : float) : float2
     
     return vec / len * maxLength
 
-def plant_seeds()
-    var tile = grid_ground_decals->getTile(player.position)
+def is_ground_prepared1(pos : int2) : bool
+    var groundTile = grid_ground->getTileInt(pos)
+
+    return groundTile.kind == TileKind SOIL
+
+def is_ground_prepared2(pos : int2) : bool
+    var decalsTile = grid_ground_decals->getTileInt(pos)
+
+    return decalsTile.kind == TileKind DECAL_PREPARED_SOIL
+
+def prepare_ground_for_seeds1(pos : int2)
+    var groundTile = grid_ground->getTileInt(pos)
+    groundTile.kind = TileKind SOIL
+    grid_ground->setTile(groundTile)
+
+    var decalsTile = grid_ground_decals->getTileInt(pos)
+    decalsTile.kind = TileKind NONE
+    decalsTile.color = groundTile.color
+    grid_ground_decals->setTile(decalsTile)
+
+def prepare_ground_for_seeds2(pos : int2)
+    var groundTile = grid_ground->getTileInt(pos)
+    
+    var decalsTile = grid_ground_decals->getTileInt(pos)
+    decalsTile.kind = TileKind DECAL_PREPARED_SOIL
+    decalsTile.color = groundTile.color
+    grid_ground_decals->setTile(decalsTile)
+
+def unprepare_ground_for_seeds2(pos : int2)
+    var groundTile = grid_ground->getTileInt(pos)
+    
+    var decalsTile = grid_ground_decals->getTileInt(pos)
+    decalsTile.kind = TileKind NONE
+    decalsTile.color = groundTile.color
+    grid_ground_decals->setTile(decalsTile)
+
+def plant_seeds(pos : int2)
+    var tile = grid_items->getTileInt(pos)
     tile.kind = TileKind PLANTED_SEEDS
-    grid_ground_decals->setTile(tile)
-
+    grid_items->setTile(tile)
+    player.items[TileKind WHEAT_FULL] -= 1
 def open_chest(var chest : Tile)
-    chest.kind = TileKind NONE
-    grid_items->setTile(chest)
-
     if random_float(seed) > 0.5
         player.health = min(player.health + 1, max_health)
+        chest.kind = TileKind HEART_FULL
+        pick(chest)
     else
         player.hunger = min(player.hunger + 1, max_hunger)
+        chest.kind = TileKind HUNGER_FULL
+        pick(chest)
+
+    grid_items->setTile(chest)
+    player.items[TileKind GOLD] += 1
+
+def cut_tree(var tree : Tile)
+    if tree.anim.kind != AnimKind NONE
+        return
+
+    var isFinalHit = tree.info >= 3
+    if isFinalHit
+        tree.anim.kind = AnimKind TREE_FALL
+        tree.anim.t = 0.0
+        tree.anim.stopT = 1.0
+        grid_items->setTile(tree)
+    else
+        tree.info += 1
+        tree.anim.kind = AnimKind SQUASH_AND_STRETCH
+        tree.anim.t = 0.0
+        tree.anim.stopT = 0.2
+        grid_items->setTile(tree)
+
+def pick(var tile : Tile)
+    if tile.anim.kind != AnimKind NONE
+        return
+    
+    player.items[tile.kind] += 1
+    tile.anim.kind = AnimKind PICK
+    tile.anim.t = 0.0
+    tile.anim.stopT = 0.5
+    grid_items->setTile(tile)
+
+    if tile.kind == TileKind WHEAT_FULL
+        player.items[tile.kind] += 1
+        unprepare_ground_for_seeds2(tile.position)
+
+def is_pickable(tile : TileKind) : bool
+    return tile == TileKind WOOD || tile == TileKind WHEAT_FULL
 
 def do_action()
     var item = grid_items->getTile(player.position)
     if item.kind == TileKind CHEST_IRON
         open_chest(item)
     elif item.kind == TileKind NONE
-        plant_seeds()
+        if is_ground_prepared1(item.position) && is_ground_prepared2(item.position)
+            if player.items[TileKind WHEAT_FULL] > 0
+                plant_seeds(item.position)
+        else
+            if is_ground_prepared1(item.position)
+                prepare_ground_for_seeds2(item.position)
+            else
+                prepare_ground_for_seeds1(item.position)
+    elif int(item.kind) >= int(TileKind TREE_GREEN) && int(item.kind) <= int(TileKind TREE_RED)
+        cut_tree(item)
+    elif is_pickable(item.kind)
+        pick(item)
+
+def handle_anim_finished(var tile : Tile&)
+    if tile.anim.kind == AnimKind TREE_FALL
+        tile.kind = TileKind WOOD
+    elif tile.anim.kind == AnimKind PICK
+        tile.kind = TileKind NONE
+    tile.anim.kind = AnimKind NONE
 
 [export]
 def act(dt: float)
+    set_window_title("wasisdasbox {int(1.0/dt)}")
+
     if get_key(VK_ESCAPE)
         schedule_quit_game()
 
@@ -246,6 +348,28 @@ def act(dt: float)
 
     camera.position = lerp(camera.position, player.position, dt * 3.0) 
     camera->updateOffsetAndScale()
+
+    for tile in grid_items.tiles
+        if tile.anim.kind == AnimKind NONE
+            continue
+        tile.anim.t += dt
+        if tile.anim.t >= tile.anim.stopT
+            handle_anim_finished(tile)
+        grid_items->setTile(tile)
+
+    wheat_grow_timer += dt
+    if wheat_grow_timer > wheat_grow_period
+        wheat_grow_timer -= wheat_grow_period
+        for tile in grid_items.tiles
+            if tile.kind == TileKind PLANTED_SEEDS
+                tile.kind = TileKind WHEAT_SMALL
+            elif tile.kind == TileKind WHEAT_SMALL
+                tile.kind = TileKind WHEAT_MEDIUM
+            elif tile.kind == TileKind WHEAT_MEDIUM
+                tile.kind = TileKind WHEAT_FULL
+
+            grid_items->setTile(tile)
+
 
     return
 
@@ -341,6 +465,9 @@ def get_tile_texture_rect(kind : TileKind) : float4
     elif kind == TileKind FENCE_V
         x = 14
         y = 3
+    elif kind == TileKind DECAL_PREPARED_SOIL
+        x = 13
+        y = 5
     elif kind == TileKind DECAL_SMALL
         x = 18
         y = 0
@@ -366,8 +493,20 @@ def get_tile_texture_rect(kind : TileKind) : float4
         x = 7
         y = 5
     elif kind == TileKind PLANTED_SEEDS
-        x = 19
-        y = 0
+        x = 9
+        y = 5
+    elif kind == TileKind WHEAT_SMALL
+        x = 10
+        y = 5
+    elif kind == TileKind WHEAT_MEDIUM
+        x = 11
+        y = 5
+    elif kind == TileKind WHEAT_FULL
+        x = 12
+        y = 5
+    elif kind == TileKind WOOD
+        x = 8
+        y = 5
 
     return float4(x*tileSizeX,y*tileSizeY,tileSizeX,tileSizeY)
 
@@ -417,7 +556,7 @@ def processCollision(var charPos : float2&; tile : Tile)
 
     if tile.kind == TileKind TREE_GREEN || tile.kind == TileKind TREE_YELLOW || tile.kind == TileKind TREE_RED
         processCollisionCircle(deltaPos, 0.3)
-    elif tile.kind == TileKind CHEST_IRON
+    elif tile.kind == TileKind CHEST_IRON || tile.kind == TileKind WOOD
         deltaPos.y -= 0.12
         processCollisionCircle(deltaPos, 0.4)
         deltaPos.y += 0.12
@@ -432,48 +571,95 @@ def processCollision(var charPos : float2&; tile : Tile)
     
     charPos = float2(tile.position) + deltaPos
 
-def draw_tile(pos : float2; kind : TileKind; color : uint = 0xffffffff)
+def apply_anim(anim : Anim; var pos : float2&; var size : float2&; var angle : float&)
+    if anim.kind == AnimKind NONE
+        return
+    
+    if anim.kind == AnimKind SQUASH_AND_STRETCH
+        var t = (anim.t / anim.stopT) * PI * 2.0
+        size.x *= 1.0 + sin(t) * 0.1
+        size.y /= 1.0 + sin(t) * 0.1
+        //angle = sin(t/3.0) * 0.1
+    elif anim.kind == AnimKind TREE_FALL
+        var t = (anim.t / anim.stopT)
 
-    var size = float2(18.0,28.0) * camera.scale
+        var tSize = min(t * PI * 2.0 * 4.0, PI*2.0)
+        size.x *= 1.0 + sin(tSize) * 0.1
+        size.y /= 1.0 + sin(tSize) * 0.1
+
+        var tAngle = t * PI / 2.0
+        angle = tAngle * sin(tAngle)*sin(tAngle)
+
+        var percent = 0.7
+        var tSize2 = max(0.0, (t - percent) * (1.0 / (1.0 - percent))) * PI/2.0
+        pos.y += sin(tSize2)*0.2
+    elif anim.kind == AnimKind PICK
+        var t = (anim.t / anim.stopT) * PI * 0.5
+        pos.y += sin(t)*0.2
+
+        pass
+
+    pass
+
+def draw_tile(pos : float2; anim : Anim; kind : TileKind; color : uint = 0xffffffff)
+    var p = pos
+    var angle = 0.0
+    var size = float2(1.0,1.0)
+    apply_anim(anim, p, size, angle)
+
+    size *= float2(tileSizeX,tileSizeY) * camera.scale
     var texture_rect = get_tile_texture_rect(kind)
-    var clip_space_pos = camera->worldToScreen(pos)
 
-    draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, 0.0, 0.5f,0.5f)
+    var pivot = float2(0.5,0.5)
+    //TODO separate func
+    if kind == TileKind TREE_GREEN || kind == TileKind TREE_YELLOW || kind == TileKind TREE_RED
+        pivot = float2(0.5,1.0)
+    if kind == TileKind PLANTED_SEEDS || kind == TileKind WHEAT_SMALL || kind == TileKind WHEAT_MEDIUM || kind == TileKind WHEAT_FULL
+        p.y -= 1.0
+
+    
+    var clip_space_pos = camera->worldToScreen(p + (float2(0.5,0.5) - pivot) * tileSizeY / tileFloorSizeY)
+
+    draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, angle, pivot.x, pivot.y)
 
     pass
 
 struct TileWithPos
     pos : float2
     kind : TileKind
+    anim : Anim
     color : uint
     priority : int
 
 var drawTilesQueue : array<TileWithPos>
 
 def draw_tile(tile : Tile)
-    draw_tile(float2(float(tile.position.x), float(tile.position.y) + tile.z * tileZToY), tile.kind, tile.color)
+    draw_tile(float2(float(tile.position.x), float(tile.position.y) + tile.z * tileZToY), tile.anim, tile.kind, tile.color)
 
-def add_to_draw_queue(pos : float2; kind : TileKind; priority : int = 0; color : uint = 0xffffffff)
+def add_to_draw_queue(pos : float2; kind : TileKind; anim : Anim; priority : int = 0; color : uint = 0xffffffff)
     var t : TileWithPos
     t.pos = pos
     t.kind = kind
     t.color = color
     t.priority = priority
+    t.anim = anim
     push(drawTilesQueue, t)
 
 def draw_item_tile(tile : Tile)
     var picOffset = float2(0.0,1.0)
-    add_to_draw_queue(float2(float(tile.position.x), float(tile.position.y) + tile.z * tileZToY) + picOffset, tile.kind, 0, tile.color)
+    add_to_draw_queue(float2(float(tile.position.x), float(tile.position.y) + tile.z * tileZToY) + picOffset, tile.kind, tile.anim, 0, tile.color)
 
 def draw_character(player : Character?)
     var runningOffset = min(player.speed, 1.0) * 0.1 * abs(sin(10.0 * get_time_after_start() * (player.isRunning ? 2.0 : 1.0)))
     var picOffset = float2(0.0,0.9)
     var zOffset = float2(0.0,player.z * tileZToY)
     var pos = player.position
-    add_to_draw_queue(pos + picOffset + float2(0.0, runningOffset) + zOffset, player.kind)
+    var anim : Anim
+    add_to_draw_queue(pos + picOffset + float2(0.0, runningOffset) + zOffset, player.kind, anim)
 
 def draw_tile_highlight(tile : Tile)
-    add_to_draw_queue(float2(float(tile.position.x), float(tile.position.y) + tile.z * tileZToY), TileKind TILE_SELECTION, 1)
+    var anim : Anim
+    add_to_draw_queue(float2(float(tile.position.x), float(tile.position.y) + tile.z * tileZToY), TileKind TILE_SELECTION, anim, 1)
     pass
 
 def draw_grid(color : uint)
@@ -511,7 +697,7 @@ def draw_ui()
             texture_rect = get_tile_texture_rect(TileKind HEART_HALF)
         else
             texture_rect = get_tile_texture_rect(TileKind HEART_EMPTY)
-        var clip_space_pos = float2(10.0 + 16.0 * float(i),14.0)*3.0
+        var clip_space_pos = float2(10.0 + 16.0 * float(i),0.0)*3.0
 
         draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, 0.0, 0.5f,0.5f)
 
@@ -527,11 +713,23 @@ def draw_ui()
             texture_rect = get_tile_texture_rect(TileKind HUNGER_HALF)
         else
             texture_rect = get_tile_texture_rect(TileKind HUNGER_EMPTY)
-        var clip_space_pos = float2(9.5 + 16.0 * float(i),14.0 + 14.0)*3.0
+        var clip_space_pos = float2(9.5 + 16.0 * float(i),0.0 + 14.0)*3.0
 
         draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, 0.0, 0.5f,0.5f)
 
+    var y = 100
+    for kind, count in keys(player.items),values(player.items)
+        text_out(10,y, "{kind} {count}", 0xffffffff)
+        y += 20
     pass
+
+var camFSizeX = 12.0
+var camFSizeY = 10.0
+def is_culled(pos : float2) : bool
+    return abs(camera.position.x - pos.x) > camFSizeX || abs(camera.position.y - pos.y) > camFSizeY
+
+def is_culled(pos : int2) : bool
+    return abs(camera.position.x - float(pos.x)) > camFSizeX || abs(camera.position.y - float(pos.y)) > camFSizeY
 
 [export]
 def draw
@@ -549,20 +747,30 @@ def draw
     
     idx = length(grid_ground.tiles)-1
     while idx >= 0
-        draw_tile(grid_ground.tiles[idx])
+        let tile = grid_ground.tiles[idx] 
         idx -= 1
+        if is_culled(tile.position)
+            continue
+        draw_tile(tile)
 
     idx = length(grid_ground_decals.tiles)-1
     while idx >= 0
-        draw_tile(grid_ground_decals.tiles[idx])
+        let tile = grid_ground_decals.tiles[idx] 
         idx -= 1
+        if is_culled(tile.position)
+            continue
+        draw_tile(tile)
         
 
     for tile in grid_items.tiles
+        if is_culled(tile.position)
+            continue
         if tile.kind != TileKind NONE
             draw_item_tile(tile)
             
     for ch in characters
+        if is_culled(ch.position)
+            continue
         draw_character(ch)
     
     draw_tile_highlight(grid_ground->getTile(player.position))
@@ -570,7 +778,7 @@ def draw
     sort(drawTilesQueue, $(a,b)=>a.priority==b.priority && a.pos.y>b.pos.y || a.priority>b.priority)
 
     for tile in drawTilesQueue
-        draw_tile(tile.pos, tile.kind, tile.color)
+        draw_tile(tile.pos, tile.anim, tile.kind, tile.color)
 
     if draw_grid
         draw_grid(0x08ffffff)

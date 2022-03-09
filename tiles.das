@@ -10,6 +10,7 @@ enum TileKind
     HUMAN
     CHILD_A
     CHILD_B
+    WOOD
     TREE_GREEN
     TREE_YELLOW
     TREE_RED
@@ -19,6 +20,7 @@ enum TileKind
     FENCE_V
     DECAL_SMALL
     DECAL_BIG
+    DECAL_PREPARED_SOIL
     HEART_FULL
     HEART_HALF
     HEART_EMPTY
@@ -26,33 +28,60 @@ enum TileKind
     HUNGER_HALF
     HUNGER_EMPTY
     PLANTED_SEEDS
+    WHEAT_SMALL
+    WHEAT_MEDIUM
+    WHEAT_FULL
+    GOLD
+
+enum AnimKind
+    NONE
+    SQUASH_AND_STRETCH
+    TREE_FALL
+    PICK
+
+struct Anim
+    kind : AnimKind
+    t : float
+    stopT : float
 
 struct Tile
     position: int2
     z : float
     color : uint = 0xffffffff
     kind : TileKind
+    anim : Anim
+    info : int
 
 class Grid
     width : int
     height : int
     tiles : array<Tile>
 
-    def getIdx_int(pos : int2) : int
+    def getIdxInt(pos : int2) : int
         var idx = pos.x * height + pos.y
         if idx >= length(self.tiles) || idx < 0
             return -1
         return idx
 
     def getIdx(pos : float2) : int
-        return getIdx_int(int2(roundi(pos.x), roundi(pos.y)))
+        return getIdxInt(int2(roundi(pos.x), roundi(pos.y)))
 
 
     def setTile(tile : Tile)
-        var idx = getIdx_int(tile.position)
+        var idx = getIdxInt(tile.position)
         if idx != -1
             self.tiles[idx] = tile
 
+    def getTileInt(pos : int2) : Tile
+        var idx = getIdxInt(pos)
+        if idx == -1
+            var fakeTile : Tile
+            fakeTile.position.x = pos.x
+            fakeTile.position.y = pos.y
+            return fakeTile
+        else
+            return self.tiles[idx]
+    
     def getTile(pos : float2) : Tile
         var idx = getIdx(pos)
         if idx == -1
