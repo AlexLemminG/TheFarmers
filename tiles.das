@@ -1,5 +1,7 @@
 require math
 
+options debugger            // uncomment for debug in VS Code
+require daslib/debug        // uncomment for debug in VS Code
 
 enum TileKind
     NONE

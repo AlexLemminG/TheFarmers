@@ -1,6 +1,8 @@
 require daslib/media
 
 require tiles
+options debugger            // uncomment for debug in VS Code
+require daslib/debug        // uncomment for debug in VS Code
 
 var pieces : ImageHandle
 var tiles : ImageHandle
