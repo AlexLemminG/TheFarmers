@@ -1,6 +1,4 @@
 require daslib/media
-options debugger            // uncomment for debug in VS Code
-require daslib/debug        // uncomment for debug in VS Code
 
 require tiles
 
@@ -42,7 +40,26 @@ class Character
     health : int = 3
     hunger : int = 3
     isRunning : bool = false
+    mirrorX : bool
     items : table<TileKind; int> 
+    on_leash : bool = false
+    follow_player_on_leash : bool = false
+
+def GetPreferedSpeed(character : Character?) : float
+    if character.kind == TileKind SHEEP
+        return 0.5
+    elif character.kind == TileKind HORSE
+        return 2.0
+    else
+        return GetMaxSpeed(character) / 2.0
+
+def GetMaxSpeed(character : Character?) : float
+    if character.kind == TileKind HORSE || character.kind == TileKind HUMAN_ON_HORSE
+        return 4.0
+    elif character.kind == TileKind SHEEP
+        return 2.0
+    else
+        return 2.0
 
 class Player : Character
     speed2 : float
@@ -50,7 +67,7 @@ class Player : Character
 class AiCharacter : Character
     target_position : float2
 
-var map_size = int2(100,100)
+var map_size = int2(20,20)
 var map_size_f = float2(float(map_size.x),float(map_size.y))
 var seed : int4
 
@@ -127,7 +144,7 @@ def initialize
             push_clone(grid_ground_decals.tiles, decalTile)
 
     player.position = float2(float(grid_ground.width), float(grid_ground.height )) / 2.0
-    player.kind = TileKind HUMAN
+    player.kind = TileKind HUMAN_ON_HORSE
     camera.position = player.position - float2(3.0,3.0)
 
     push(characters, player)
@@ -140,9 +157,11 @@ def initialize
         npc.kind = TileKind HUMAN
         if random_float(seed) > 0.33
             if random_float(seed) > 0.5
-                npc.kind = TileKind CHILD_A
+                npc.kind = TileKind HORSE
+            elif random_float(seed) > 0.5
+                npc.kind = TileKind SHEEP
             else
-                npc.kind = TileKind CHILD_B
+                npc.kind = TileKind SHEEP
 
 
         push(characters, npc)
@@ -272,7 +291,95 @@ def pick(var tile : Tile)
 def is_pickable(tile : TileKind) : bool
     return tile == TileKind WOOD || tile == TileKind WHEAT_FULL
 
+var prev_horse : AiCharacter?
+var prev_leashed : AiCharacter?
+
+def is_on_horse():bool
+    return player.kind == TileKind HUMAN_ON_HORSE
+
+def mount_horse(var horse : AiCharacter?)
+    if prev_horse != null
+        unleash(prev_horse)
+        prev_horse = null
+        
+    player.kind = TileKind HUMAN_ON_HORSE
+    player.mirrorX = horse.mirrorX
+
+    var idx = find_index(characters, horse)
+    erase(characters, idx)
+
+    idx = find_index(aiCharacters, horse)
+    erase(aiCharacters, idx)
+    
+
+def unmount_horse()
+    var npc = new AiCharacter()
+    npc.position = player.position
+    npc.position.y += 0.1
+    npc.target_position = npc.position
+    npc.kind = TileKind HORSE
+    npc.z = player.z
+    npc.mirrorX = player.mirrorX
+    npc.on_leash = true
+    npc.follow_player_on_leash = false
+    prev_horse = npc
+    
+    player.kind = TileKind HUMAN
+
+    push(characters, npc)
+    push(aiCharacters, npc)
+
+def unleash(var npc : AiCharacter?)
+    npc.on_leash = false
+
+def leash_to_player(var npc : AiCharacter?)
+    if prev_leashed != null
+        unleash(prev_leashed)
+        prev_leashed = null
+    
+    npc.on_leash = true
+    npc.follow_player_on_leash = true
+    prev_leashed = npc
+
+def get_nearest_npc(pos : float2) : AiCharacter?
+    var nearestDist = 100.0
+    var nearestNpc : AiCharacter?
+    for npc in aiCharacters
+        var dist = length(npc.position - pos)
+        if dist < nearestDist
+            nearestDist = dist
+            nearestNpc = npc
+
+    return nearestNpc
+
+def do_alt_action()
+    if is_on_horse()
+        unmount_horse()
+        return
+    
+    if prev_leashed != null
+        unleash(prev_leashed)
+        prev_leashed = null
+        return
+
+    
+    var npc = get_nearest_npc(player.position)
+    if npc != null
+        var pp = player.position
+        var np = npc.position
+        var l = length(np - pp)
+        if l > 1.0
+            npc = null
+
+    if npc != null
+        if npc.kind == TileKind HORSE
+            mount_horse(npc)
+        elif npc.kind == TileKind SHEEP
+            leash_to_player(npc)
+
 def do_action()
+    if is_on_horse()
+        return 
     var item = grid_items->getTile(player.position)
     if item.kind == TileKind CHEST_IRON
         open_chest(item)
@@ -304,8 +411,6 @@ def act(dt: float)
     if get_key(VK_ESCAPE)
         schedule_quit_game()
 
-    var maxPlayerSpeed = 2.0
-
     var playerSpeed = 0.0
     player.velocity = float2(0.0)
     if get_key(VK_W)
@@ -319,8 +424,10 @@ def act(dt: float)
 
     if get_key_down(VK_SPACE)
         do_action()
+    if get_key_down(VK_F)
+        do_alt_action()
 
-    player.velocity = clampLength(player.velocity, 1.0) * maxPlayerSpeed
+    player.velocity = clampLength(player.velocity, 1.0) * GetMaxSpeed(player)
     if get_key(VK_LSHIFT)
         player.velocity *= 2.5
         player.isRunning = true
@@ -332,6 +439,11 @@ def act(dt: float)
         ch.speed = lerp(ch.speed, length(ch.velocity), dt*5.0)
         ch.z = lerp(ch.z, grid_ground->getHeight(ch.position), dt * 8.0)
 
+        if ch.velocity.x < -0.1
+            ch.mirrorX = false
+        elif ch.velocity.x > 0.1
+            ch.mirrorX = true
+
         for x in range(int(ch.position.x), int(ch.position.x+2.0))
             for y in range(int(ch.position.y), int(ch.position.y+2.0))
                 var tileToCollide = grid_items->getTile(float2(float(x), float(y)))
@@ -342,8 +454,17 @@ def act(dt: float)
     for ch in aiCharacters
         if length(ch.target_position - ch.position) < 1.0
             ch.target_position = float2(random_float(seed) * float(map_size.x), random_float(seed) * float(map_size.y))
-            pass
-        ch.velocity = lerp(ch.velocity, clampLength(ch.target_position - ch.position, 1.f) * maxPlayerSpeed, 3.0 * dt)
+            continue
+        var preferedSpeed = GetPreferedSpeed(ch)
+        if ch.on_leash
+            var leash_length = 1.0
+            var delta = player.position - ch.position
+            if ch.follow_player_on_leash && length(delta) > 1.0
+                ch.target_position = ch.position + clampLength(delta, length(delta) - leash_length)
+            else
+                ch.target_position = ch.position
+            preferedSpeed = min(length(delta), GetMaxSpeed(ch))
+        ch.velocity = lerp(ch.velocity, clampLength(ch.target_position - ch.position, 1.f) * preferedSpeed, 3.0 * dt)
 
 
     camera.position = lerp(camera.position, player.position, dt * 3.0) 
@@ -507,6 +628,15 @@ def get_tile_texture_rect(kind : TileKind) : float4
     elif kind == TileKind WOOD
         x = 8
         y = 5
+    elif kind == TileKind HORSE
+        x = 16
+        y = 2
+    elif kind == TileKind HUMAN_ON_HORSE
+        x = 14
+        y = 5
+    elif kind == TileKind SHEEP
+        x = 15
+        y = 5
 
     return float4(x*tileSizeX,y*tileSizeY,tileSizeX,tileSizeY)
 
@@ -601,11 +731,17 @@ def apply_anim(anim : Anim; var pos : float2&; var size : float2&; var angle : f
 
     pass
 
-def draw_tile(pos : float2; anim : Anim; kind : TileKind; color : uint = 0xffffffff)
-    var p = pos
+def draw_tile(tile : TileFloat)
+    var pos = tile.position
+    pos.y += tile.z * tileZToY
+    var kind = tile.kind
+    var color = tile.color
+
     var angle = 0.0
     var size = float2(1.0,1.0)
-    apply_anim(anim, p, size, angle)
+    if tile.mirrorX
+        size.x = -1.0
+    apply_anim(tile.anim, pos, size, angle)
 
     size *= float2(tileSizeX,tileSizeY) * camera.scale
     var texture_rect = get_tile_texture_rect(kind)
@@ -615,52 +751,61 @@ def draw_tile(pos : float2; anim : Anim; kind : TileKind; color : uint = 0xfffff
     if kind == TileKind TREE_GREEN || kind == TileKind TREE_YELLOW || kind == TileKind TREE_RED
         pivot = float2(0.5,1.0)
     if kind == TileKind PLANTED_SEEDS || kind == TileKind WHEAT_SMALL || kind == TileKind WHEAT_MEDIUM || kind == TileKind WHEAT_FULL
-        p.y -= 1.0
+        pos.y -= 1.0
 
     
-    var clip_space_pos = camera->worldToScreen(p + (float2(0.5,0.5) - pivot) * tileSizeY / tileFloorSizeY)
+    var clip_space_pos = camera->worldToScreen(pos + (float2(0.5,0.5) - pivot) * tileSizeY / tileFloorSizeY)
 
     draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, angle, pivot.x, pivot.y)
 
-    pass
-
-struct TileWithPos
-    pos : float2
-    kind : TileKind
-    anim : Anim
-    color : uint
+struct TileWithPriority
+    tile : TileFloat
     priority : int
 
-var drawTilesQueue : array<TileWithPos>
+var drawTilesQueue : array<TileWithPriority>
 
-def draw_tile(tile : Tile)
-    draw_tile(float2(float(tile.position.x), float(tile.position.y) + tile.z * tileZToY), tile.anim, tile.kind, tile.color)
-
-def add_to_draw_queue(pos : float2; kind : TileKind; anim : Anim; priority : int = 0; color : uint = 0xffffffff)
-    var t : TileWithPos
-    t.pos = pos
-    t.kind = kind
-    t.color = color
+def add_to_draw_queue(tile : TileFloat; priority : int)
+    var t : TileWithPriority
+    t.tile = tile
     t.priority = priority
-    t.anim = anim
     push(drawTilesQueue, t)
 
-def draw_item_tile(tile : Tile)
+def draw_item_tile(tile : TileFloat)
     var picOffset = float2(0.0,1.0)
-    add_to_draw_queue(float2(float(tile.position.x), float(tile.position.y) + tile.z * tileZToY) + picOffset, tile.kind, tile.anim, 0, tile.color)
+    var t = tile
+    t.position += picOffset
+    add_to_draw_queue(t, 0)
 
-def draw_character(player : Character?)
-    var runningOffset = min(player.speed, 1.0) * 0.1 * abs(sin(10.0 * get_time_after_start() * (player.isRunning ? 2.0 : 1.0)))
+def draw_character(character : Character?)
+    var tile = TileFloat()
+    var runningOffset = min(character.speed, 1.0) * 0.1 * abs(sin(10.0 * get_time_after_start() * (character.isRunning ? 2.0 : 1.0)))
     var picOffset = float2(0.0,0.9)
-    var zOffset = float2(0.0,player.z * tileZToY)
-    var pos = player.position
+    var zOffset = float2(0.0,character.z * tileZToY)
+    var pos = character.position
     var anim : Anim
-    add_to_draw_queue(pos + picOffset + float2(0.0, runningOffset) + zOffset, player.kind, anim)
+    tile.mirrorX = character.mirrorX
+    tile.position = pos + picOffset + float2(0.0, runningOffset) + zOffset
+    tile.kind = character.kind
+
+    if character.on_leash && character.follow_player_on_leash
+        var from_pos = character.position
+        from_pos += float2(0.0, 0.4)
+        var to_pos = player.position
+        to_pos += float2(0.0, 0.2)
+        
+        from_pos = camera->worldToScreen(from_pos)
+        to_pos = camera->worldToScreen(to_pos)
+        line(from_pos.x, from_pos.y, to_pos.x, to_pos.y, 0xff333333)
+        pass
+    
+    add_to_draw_queue(tile, 0)
 
 def draw_tile_highlight(tile : Tile)
-    var anim : Anim
-    add_to_draw_queue(float2(float(tile.position.x), float(tile.position.y) + tile.z * tileZToY), TileKind TILE_SELECTION, anim, 1)
-    pass
+    var t = Tile()
+    t.position = tile.position
+    t.z = tile.z
+    t.kind = TileKind TILE_SELECTION
+    add_to_draw_queue(to_tile_float(t), 1)
 
 def draw_grid(color : uint)
     var cameraPosX = int(camera.position.x)
@@ -751,7 +896,7 @@ def draw
         idx -= 1
         if is_culled(tile.position)
             continue
-        draw_tile(tile)
+        draw_tile(to_tile_float(tile))
 
     idx = length(grid_ground_decals.tiles)-1
     while idx >= 0
@@ -759,26 +904,27 @@ def draw
         idx -= 1
         if is_culled(tile.position)
             continue
-        draw_tile(tile)
+        draw_tile(to_tile_float(tile))
         
 
     for tile in grid_items.tiles
         if is_culled(tile.position)
             continue
         if tile.kind != TileKind NONE
-            draw_item_tile(tile)
+            draw_item_tile(to_tile_float(tile))
             
     for ch in characters
         if is_culled(ch.position)
             continue
         draw_character(ch)
     
-    draw_tile_highlight(grid_ground->getTile(player.position))
+    if !is_on_horse()
+        draw_tile_highlight(grid_ground->getTile(player.position))
 
-    sort(drawTilesQueue, $(a,b)=>a.priority==b.priority && a.pos.y>b.pos.y || a.priority>b.priority)
+    sort(drawTilesQueue, $(a,b)=>a.priority==b.priority && a.tile.position.y>b.tile.position.y || a.priority>b.priority)
 
     for tile in drawTilesQueue
-        draw_tile(tile.pos, tile.anim, tile.kind, tile.color)
+        draw_tile(tile.tile)
 
     if draw_grid
         draw_grid(0x08ffffff)

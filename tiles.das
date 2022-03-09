@@ -1,7 +1,5 @@
 require math
 
-options debugger            // uncomment for debug in VS Code
-require daslib/debug        // uncomment for debug in VS Code
 
 enum TileKind
     NONE
@@ -32,6 +30,9 @@ enum TileKind
     WHEAT_MEDIUM
     WHEAT_FULL
     GOLD
+    HORSE
+    SHEEP
+    HUMAN_ON_HORSE
 
 enum AnimKind
     NONE
@@ -44,13 +45,26 @@ struct Anim
     t : float
     stopT : float
 
-struct Tile
-    position: int2
+struct TileBase
     z : float
     color : uint = 0xffffffff
     kind : TileKind
     anim : Anim
     info : int
+    mirrorX : bool
+
+
+struct Tile : TileBase
+    position: int2
+    
+struct TileFloat : TileBase
+    position: float2
+
+def to_tile_float(tile : Tile) : TileFloat
+    var result : TileFloat
+    cast<TileBase>(result) = cast<TileBase>(tile)
+    result.position = float2(float(tile.position.x), float(tile.position.y))
+    return result
 
 class Grid
     width : int
