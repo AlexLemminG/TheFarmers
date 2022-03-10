@@ -15,7 +15,6 @@ var npcCount = 10
 var hunger_per_hour = 60.0
 var health_loss_from_hunger_per_hour = 0.0
 
-
 var seconds_per_hour = 3600.0
 var hours_per_second = 1.0 / seconds_per_hour
 var pieces : ImageHandle
@@ -120,7 +119,6 @@ def initialize
     tiles <- create_managed_image("tiles.png") 
     camera.scale = 3.0
 
-
     grid_ground.width = map_size.x
     grid_ground.height = map_size.y
 
@@ -181,7 +179,7 @@ def initialize
             push_clone(grid_ground_decals.tiles, decalTile)
 
     player.position = float2(float(grid_ground.width), float(grid_ground.height )) / 2.0
-    player.kind = TileKind HUMAN_ON_HORSE
+    player.kind = TileKind HUMAN
     camera.position = player.position - float2(3.0,3.0)
 
     push(characters, player)
@@ -190,15 +188,17 @@ def initialize
         var npc = new AiCharacter()
         npc.position = float2(random_float(seed) * float(map_size.x), random_float(seed) * float(map_size.y))
         npc.target_position = npc.position
-        npc.kind = TileKind HUMAN
-        if random_float(seed) > 0.33
-            if random_float(seed) > 0.5
-                npc.kind = TileKind HORSE
-            elif random_float(seed) > 0.5
-                npc.kind = TileKind SHEEP
-            else
-                npc.kind = TileKind SHEEP
-
+        var r = random_float(seed)
+        if r > 0.7
+            npc.kind = TileKind HORSE
+        elif r > 0.4
+            npc.kind = TileKind SHEEP
+        elif r > 0.3
+            npc.kind = TileKind CHILD_A
+        elif r > 0.2
+            npc.kind = TileKind CHILD_B
+        else
+            npc.kind = TileKind HUMAN
 
         push(characters, npc)
         push(aiCharacters, npc)
@@ -627,6 +627,7 @@ def act(dt: float)
         if ch.anim.t >= ch.anim.stopT
             handle_anim_finished(ch)
 
+    //TODO separate array for such things for optimization
     for tile in grid_items.tiles
         if tile.anim.kind == AnimKind NONE
             continue
@@ -638,6 +639,7 @@ def act(dt: float)
     wheat_grow_timer += dt
     if wheat_grow_timer > wheat_grow_period
         wheat_grow_timer -= wheat_grow_period
+        //TODO separate array for such things for optimization
         for tile in grid_items.tiles
             if tile.kind == TileKind PLANTED_SEEDS
                 tile.kind = TileKind WHEAT_SMALL
@@ -645,7 +647,8 @@ def act(dt: float)
                 tile.kind = TileKind WHEAT_MEDIUM
             elif tile.kind == TileKind WHEAT_MEDIUM
                 tile.kind = TileKind WHEAT_FULL
-
+            else
+                continue
             grid_items->setTile(tile)
 
 def get_tile_texture_rect(kind : TileKind) : float4
@@ -1036,25 +1039,30 @@ def draw_ui()
         if rain_percent > 0.5
             texture_rect = get_tile_texture_rect(TileKind UI_RAIN)
             draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, 0xffffffff, size, 0.0, 0.5f,0.0f)
-        
-        //texture_rect = get_tile_texture_rect(TileKind UI_BORDER)
-        //draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, 0xffffffff, size, 0.0, 0.0f,0.0f)
 
+var camFSizeX = 36.0
+var camFSizeY = 30.0
 
-    pass
+def get_min_culled() : int2
+    var p = int2(floori(camera.position.x - camFSizeX / camera.scale), floori(camera.position.y - camFSizeY / camera.scale))
+    p.x = clamp(p.x, 0, grid_ground.width)
+    p.y = clamp(p.y, 0, grid_ground.height)
+    return p
 
-var camFSizeX = 12.0
-var camFSizeY = 10.0
+def get_max_culled() : int2
+    var p = int2(ceili(camera.position.x + camFSizeX / camera.scale), ceili(camera.position.y + camFSizeY / camera.scale))
+    p.x = clamp(p.x, 0, grid_ground.width)
+    p.y = clamp(p.y, 0, grid_ground.height)
+    return p
 
 def is_culled(pos : float2) : bool
-    return abs(camera.position.x - pos.x) > camFSizeX || abs(camera.position.y - pos.y) > camFSizeY
+    return abs(camera.position.x - pos.x) * camera.scale > camFSizeX || abs(camera.position.y - pos.y) * camera.scale > camFSizeY
 
 def is_culled(pos : int2) : bool
-    return abs(camera.position.x - float(pos.x)) > camFSizeX || abs(camera.position.y - float(pos.y)) > camFSizeY
+    return abs(camera.position.x - float(pos.x)) * camera.scale > camFSizeX || abs(camera.position.y - float(pos.y)) * camera.scale > camFSizeY
 
 [export]
 def draw
-
     clear(drawTilesQueue)
     enable_alpha_blend()
     fill_rect(0, 0, get_screen_width(), get_screen_height(), 0xff204020)
@@ -1062,30 +1070,24 @@ def draw
         draw_grid(0xffffffff)
 
     var time = get_time_after_start()
-    var idx = 0
+
+    var min_culled = get_min_culled()
+    var max_culled = get_max_culled()
     
-    idx = length(grid_ground.tiles)-1
-    while idx >= 0
-        let tile = grid_ground.tiles[idx] 
-        idx -= 1
-        if is_culled(tile.position)
-            continue
-        draw_tile(to_tile_float(tile))
+    for ix in range(min_culled.x, max_culled.x + 1)
+        var iy = max_culled.y
+        while iy >= min_culled.y
+            draw_tile(to_tile_float(grid_ground->getTileInt(int2(ix, iy))))
+            draw_tile(to_tile_float(grid_ground_decals->getTileInt(int2(ix, iy))))
+            iy -= 1
 
-    idx = length(grid_ground_decals.tiles)-1
-    while idx >= 0
-        let tile = grid_ground_decals.tiles[idx] 
-        idx -= 1
-        if is_culled(tile.position)
-            continue
-        draw_tile(to_tile_float(tile))
-        
-
-    for tile in grid_items.tiles
-        if is_culled(tile.position)
-            continue
-        if tile.kind != TileKind NONE
-            draw_item_tile(to_tile_float(tile))
+    for ix in range(min_culled.x, max_culled.x)
+        var iy = max_culled.y
+        while iy >= min_culled.y
+            var tile = grid_items->getTileInt(int2(ix, iy))
+            if tile.kind != TileKind NONE
+                draw_item_tile(to_tile_float(tile))
+            iy -= 1
             
     for ch in characters
         if is_culled(ch.position)
