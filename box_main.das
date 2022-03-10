@@ -5,14 +5,19 @@ options debugger            // uncomment for debug in VS Code
 require daslib/debug        // uncomment for debug in VS Code
 
 // tweakable settings
+var night_percent = 0.0
 var rain_percent = 0.0
 var wheat_grow_timer = 0.0
 var wheat_grow_period = 5.0
 var draw_grid = false
 var map_size = int2(20,20)
 var npcCount = 10
+var hunger_per_hour = 60.0
+var health_loss_from_hunger_per_hour = 0.0
 
 
+var seconds_per_hour = 3600.0
+var hours_per_second = 1.0 / seconds_per_hour
 var pieces : ImageHandle
 var tiles : ImageHandle
 
@@ -32,11 +37,27 @@ var topDownYToY = tileFloorSizeX / tileFloorSizeY
 
 var characters : array<Character?>
 var aiCharacters : array<AiCharacter?>
-let max_health = 6
-let max_hunger = 6
 
 var map_size_f = float2(float(map_size.x),float(map_size.y))
 var seed : int4
+
+def color_to_float4_fix(c: uint): float4
+    let b = c & 0xFF
+    let g = (c >> 8u) & 0xFF
+    let r = (c >> 16u) & 0xFF
+    let a = (c >> 24u) & 0xFF
+    return float4(r, g, b, a) / 255.0
+
+def color_to_float3_fix(c: uint): float3
+    let b = c & 0xFF
+    let g = (c >> 8u) & 0xFF
+    let r = (c >> 16u) & 0xFF
+    return float3(r, g, b) / 255.0
+
+def lerp_colors_fix(a, b: uint; t: float): uint
+    let f1 = color_to_float4_fix(a)
+    let f2 = color_to_float4_fix(b)
+    return make_color(lerp(f1, f2, t))
 
 class Character
     position : float2
@@ -44,13 +65,19 @@ class Character
     z : float
     speed : float
     kind : TileKind
-    health : int = 3
-    hunger : int = 3
+    health : float = 0.5
+    hunger : float = 0.5
     isRunning : bool = false
     mirrorX : bool
     items : table<TileKind; int> 
     on_leash : bool = false
     follow_player_on_leash : bool = false
+    color : uint = 0xFFFFFFFF
+    anim : Anim
+    carry_item : TileKind = TileKind NONE
+
+def is_big_item(kind : TileKind) : bool
+    return kind == TileKind WOOD
 
 def GetPreferedSpeed(character : Character?) : float
     if character.kind == TileKind SHEEP
@@ -74,6 +101,12 @@ class Player : Character
 class AiCharacter : Character
     target_position : float2
 
+def die(var character : Character?)
+    if character.anim.kind == AnimKind DEATH
+        return
+    character.anim.kind = AnimKind DEATH
+    character.anim.t = 0.0
+    character.anim.stopT = 0.5
 
 // 'initialize' runs once when game starts and every hot-reload
 [export]
@@ -107,7 +140,7 @@ def initialize
                 tile.z = 0.0
             tile.kind = random_float(seed) > 0.1 ? TileKind GRASS : TileKind SOIL    
             tile.z = float(random_int(seed) % int(tileFloorHeightZ) / 3) / tileFloorHeightZ
-            var tint = clamp(lerp(random_float(seed), 1.0, 0.8) - rain_percent * 0.2, 0.0, 1.0)
+            var tint = lerp(random_float(seed), 1.0, 0.8)
             tile.color = make_color(tint)
 
             push_clone(grid_ground.tiles, tile)
@@ -116,7 +149,7 @@ def initialize
             item_tile.position = int2(x,y)
             item_tile.z = tile.z
             item_tile.kind = TileKind NONE
-            tint = 1.0 - rain_percent * 0.1
+            tint = 1.0
             item_tile.color = make_color(tint)
             if tile.kind == TileKind GRASS
                 if random_float(seed) > 0.8
@@ -243,11 +276,11 @@ def plant_seeds(pos : int2)
 
 def open_chest(var chest : Tile)
     if random_float(seed) > 0.5
-        player.health = min(player.health + 1, max_health)
+        player.health = min(player.health + 0.1, 1.0)
         chest.kind = TileKind HEART_FULL
         pick(chest)
     else
-        player.hunger = min(player.hunger + 1, max_hunger)
+        player.hunger = max(player.hunger - 0.5, 0.0)
         chest.kind = TileKind HUNGER_FULL
         pick(chest)
 
@@ -271,19 +304,40 @@ def cut_tree(var tree : Tile)
         tree.anim.stopT = 0.2
         grid_items->setTile(tree)
 
+def drop(kind : TileKind; pos : int2)
+    player.carry_item = TileKind NONE
+
+    var tile = grid_items->getTileInt(pos)
+    tile.anim.kind = AnimKind NONE
+    tile.kind = kind
+    grid_items->setTile(tile)
+
+def item_count_per_tile(kind : TileKind) : int
+    if kind == TileKind WHEAT_FULL
+        return 2
+    return 1
+
 def pick(var tile : Tile)
     if tile.anim.kind != AnimKind NONE
         return
-    
-    player.items[tile.kind] += 1
-    tile.anim.kind = AnimKind PICK
-    tile.anim.t = 0.0
-    tile.anim.stopT = 0.5
-    grid_items->setTile(tile)
+    var kind = tile.kind
+
 
     if tile.kind == TileKind WHEAT_FULL
-        player.items[tile.kind] += 1
         unprepare_ground_for_seeds2(tile.position)
+    
+    if is_big_item(tile.kind)
+        if player.carry_item != TileKind NONE
+            drop(player.carry_item, tile.position)
+        player.carry_item = tile.kind
+        tile.kind = TileKind NONE
+    else
+        player.items[tile.kind] += item_count_per_tile(tile.kind)
+        tile.anim.kind = AnimKind PICK
+        tile.anim.t = 0.0
+        tile.anim.stopT = 0.5
+
+    grid_items->setTile(tile)
 
 def is_pickable(tile : TileKind) : bool
     return tile == TileKind WOOD || tile == TileKind WHEAT_FULL
@@ -291,8 +345,8 @@ def is_pickable(tile : TileKind) : bool
 var prev_horse : AiCharacter?
 var prev_leashed : AiCharacter?
 
-def is_on_horse():bool
-    return player.kind == TileKind HUMAN_ON_HORSE
+def is_on_horse(character : Character?):bool
+    return character.kind == TileKind HUMAN_ON_HORSE
 
 def mount_horse(var horse : AiCharacter?)
     if prev_horse != null
@@ -349,15 +403,41 @@ def get_nearest_npc(pos : float2) : AiCharacter?
 
     return nearestNpc
 
+
+
 def do_alt_action()
-    if is_on_horse()
-        unmount_horse()
-        return
+    _alt_action(true)
+    pass
+
+def highlight_alt_action()
+    if highlightedAltActionNpc != null
+        set_highlighted(highlightedAltActionNpc, false)
+        highlightedAltActionNpc = null
+
+    highlightedAltActionNpc = _alt_action(false)
+    if highlightedAltActionNpc != null
+        set_highlighted(highlightedAltActionNpc, true)
+
+    pass
+
+var highlightedAltActionNpc : Character?
+def set_highlighted(var character : Character?; is_highlighted : bool)
+    if is_highlighted
+        character.color = 0xffffff80
+    else
+        character.color = 0xffffffff
+
+def _alt_action(exec : bool) : AiCharacter?
+    if is_on_horse(player)
+        if exec
+            unmount_horse()
+        return null
     
     if prev_leashed != null
-        unleash(prev_leashed)
-        prev_leashed = null
-        return
+        if exec
+            unleash(prev_leashed)
+            prev_leashed = null
+        return null
 
     
     var npc = get_nearest_npc(player.position)
@@ -370,29 +450,87 @@ def do_alt_action()
 
     if npc != null
         if npc.kind == TileKind HORSE
-            mount_horse(npc)
+            if exec
+                mount_horse(npc)
+            return npc
         elif npc.kind == TileKind SHEEP
-            leash_to_player(npc)
+            if exec
+                leash_to_player(npc)
+            return npc
+    return null
 
 def do_action()
-    if is_on_horse()
-        return 
+    _do_action(true)
+
+def can_do_action() : bool
+    return _do_action(false)
+
+var day_percent = 0.0
+var day_float = 0.5
+var gamedays_per_hour = 60.0
+def update_env(dt : float)
+    day_float += dt * gamedays_per_hour / seconds_per_hour
+    day_percent = day_float - float(trunci(day_float))
+
+    var day_percent_radians = day_percent * PI * 2.0
+
+    night_percent = 0.5 + sin(day_percent_radians) * 0.5
+
+    var is_rainy = sin(day_float) > 0.7
+    rain_percent = lerp(rain_percent, is_rainy ? 1.0 : 0.0, dt)
+
+def _do_action(exec : bool) : bool
+    if is_on_horse(player)
+        return false
     var item = grid_items->getTile(player.position)
+
+    if player.carry_item != TileKind NONE
+        var on_empty_tile = item.kind == TileKind NONE
+        if !on_empty_tile
+            return false
+        if exec
+            drop(player.carry_item, grid_items->getTile(player.position).position)
+        return true
+
+    if is_pickable(item.kind)
+        if exec
+            pick(item)
+        return true
+    elif player.carry_item != TileKind NONE
+        var on_empty_tile = item.kind == TileKind NONE
+        if !on_empty_tile
+            return false
+        if exec
+            drop(player.carry_item, grid_items->getTile(player.position).position)
+        return true
     if item.kind == TileKind CHEST_IRON
-        open_chest(item)
+        if exec
+            open_chest(item)
+        return true
     elif item.kind == TileKind NONE
         if is_ground_prepared1(item.position) && is_ground_prepared2(item.position)
             if player.items[TileKind WHEAT_FULL] > 0
-                plant_seeds(item.position)
+                if exec
+                    plant_seeds(item.position)
+                return true
         else
-            if is_ground_prepared1(item.position)
-                prepare_ground_for_seeds2(item.position)
-            else
-                prepare_ground_for_seeds1(item.position)
+            if exec
+                if is_ground_prepared1(item.position)
+                    prepare_ground_for_seeds2(item.position)
+                else
+                    prepare_ground_for_seeds1(item.position)
+            return true
     elif int(item.kind) >= int(TileKind TREE_GREEN) && int(item.kind) <= int(TileKind TREE_RED)
-        cut_tree(item)
-    elif is_pickable(item.kind)
-        pick(item)
+        if exec
+            cut_tree(item)
+        return true
+    return false
+
+def handle_anim_finished(var ch : Character?)
+    if ch.anim.kind == AnimKind DEATH
+        ch.anim.t = ch.anim.stopT//hacky
+        pass
+    pass
 
 def handle_anim_finished(var tile : Tile&)
     if tile.anim.kind == AnimKind TREE_FALL
@@ -404,11 +542,11 @@ def handle_anim_finished(var tile : Tile&)
 [export]
 def act(dt: float)
     set_window_title("wasisdasbox {int(1.0/dt)}")
-
     if get_key(VK_ESCAPE)
         schedule_quit_game()
 
-    var playerSpeed = 0.0
+    update_env(dt)
+
     player.velocity = float2(0.0)
     if get_key(VK_W)
         player.velocity.y += 1.0
@@ -419,6 +557,7 @@ def act(dt: float)
     if get_key(VK_A)
         player.velocity.x -= 1.0
 
+    highlight_alt_action()
     if get_key_down(VK_SPACE)
         do_action()
     if get_key_down(VK_F)
@@ -426,12 +565,26 @@ def act(dt: float)
 
     player.velocity = clampLength(player.velocity, 1.0) * GetMaxSpeed(player)
     if get_key(VK_LSHIFT)
+        //todo less running on horse + some penalty
         player.velocity *= 2.5
         player.isRunning = true
     else
         player.isRunning = false
 
     for ch in characters
+        if ch.health == 0.0
+            die(ch)
+            continue
+
+        var hunger_speed = hunger_per_hour * hours_per_second
+        if ch.isRunning && !is_on_horse(ch)
+            hunger_speed *= 2.0
+        ch.hunger = min(1.0, ch.hunger + dt * hunger_speed)
+
+        if ch.hunger == 1.0
+            ch.health = max(0.0, ch.health - dt * health_loss_from_hunger_per_hour * hours_per_second)
+
+
         ch.position += ch.velocity * dt
         ch.speed = lerp(ch.speed, length(ch.velocity), dt*5.0)
         ch.z = lerp(ch.z, grid_ground->getHeight(ch.position), dt * 8.0)
@@ -466,6 +619,13 @@ def act(dt: float)
 
     camera.position = lerp(camera.position, player.position, dt * 3.0) 
     camera->updateOffsetAndScale()
+
+    for ch in characters
+        if ch.anim.kind == AnimKind NONE
+            continue
+        ch.anim.t += dt
+        if ch.anim.t >= ch.anim.stopT
+            handle_anim_finished(ch)
 
     for tile in grid_items.tiles
         if tile.anim.kind == AnimKind NONE
@@ -578,6 +738,18 @@ def get_tile_texture_rect(kind : TileKind) : float4
     elif kind == TileKind SHEEP
         x = 15
         y = 5
+    elif kind == TileKind UI_BORDER
+        x = 0
+        y = 6
+    elif kind == TileKind UI_NIGHT
+        x = 1
+        y = 6
+    elif kind == TileKind UI_DAY
+        x = 2
+        y = 6
+    elif kind == TileKind UI_RAIN
+        x = 3
+        y = 6
 
     return float4(float(x)*tileSizeX,float(y)*tileSizeY,tileSizeX,tileSizeY)
 
@@ -665,33 +837,55 @@ def apply_anim(anim : Anim; var pos : float2&; var size : float2&; var angle : f
         pos.y += sin(t)*0.2
 
         pass
+    elif anim.kind == AnimKind DEATH
+        var t = (anim.t / anim.stopT)
+        var tAngle = t * PI / 2.0
+        angle = tAngle * sin(tAngle)*sin(tAngle)
+
+        pass
 
     pass
+
+def calc_light(pos : float2) : float
+    return 1.0 - night_percent * 0.5 - rain_percent * 0.2
+
+def get_pivot(kind : TileKind) : float2
+    if kind == TileKind TREE_GREEN || kind == TileKind TREE_YELLOW || kind == TileKind TREE_RED
+        return float2(0.5,1.0)
+    elif kind == TileKind HUMAN || kind == TileKind CHILD_A || kind == TileKind CHILD_B
+        return float2(0.5,1.0)
+    elif kind == TileKind HUMAN_ON_HORSE ||  kind == TileKind HORSE || kind == TileKind SHEEP
+        return float2(0.7,1.0)
+    else
+        return float2(0.5,0.5)
 
 def draw_tile(tile : TileFloat)
     var pos = tile.position
     pos.y += tile.z * tileZToY
     var kind = tile.kind
     var color = tile.color
+    var pivot = get_pivot(kind)
 
     var angle = 0.0
     var size = float2(1.0,1.0)
-    if tile.mirrorX
-        size.x = -1.0
     apply_anim(tile.anim, pos, size, angle)
+
+    if tile.mirrorX
+        size.x = -size.x
+        angle = -angle
 
     size *= float2(tileSizeX,tileSizeY) * camera.scale
     var texture_rect = get_tile_texture_rect(kind)
 
-    var pivot = float2(0.5,0.5)
-    //TODO separate func
-    if kind == TileKind TREE_GREEN || kind == TileKind TREE_YELLOW || kind == TileKind TREE_RED
-        pivot = float2(0.5,1.0)
+    color = lerp_colors_fix(0xff000000, color, calc_light(pos))
+
     if kind == TileKind PLANTED_SEEDS || kind == TileKind WHEAT_SMALL || kind == TileKind WHEAT_MEDIUM || kind == TileKind WHEAT_FULL
         pos.y -= 1.0
 
-    
-    var clip_space_pos = camera->worldToScreen(pos + (float2(0.5,0.5) - pivot) * tileSizeY / tileFloorSizeY)
+    var offset_from_pivot = float2((0.5 - pivot.x), (0.5 - pivot.y) * tileSizeY / tileFloorSizeY)
+    if !tile.mirrorX
+        offset_from_pivot.x = -offset_from_pivot.x
+    var clip_space_pos = camera->worldToScreen(pos + offset_from_pivot)
 
     draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, angle, pivot.x, pivot.y)
 
@@ -713,9 +907,15 @@ def draw_item_tile(tile : TileFloat)
     t.position += picOffset
     add_to_draw_queue(t, 0)
 
+def is_dead(character : Character?) : bool
+    return character.anim.kind == AnimKind DEATH
+
 def draw_character(character : Character?)
     var tile = TileFloat()
+    
     var runningOffset = min(character.speed, 1.0) * 0.1 * abs(sin(10.0 * get_time_after_start() * (character.isRunning ? 2.0 : 1.0)))
+    if is_dead(character)
+        runningOffset = 0.0
     var picOffset = float2(0.0,0.9)
     var zOffset = float2(0.0,character.z * tileZToY)
     var pos = character.position
@@ -723,6 +923,8 @@ def draw_character(character : Character?)
     tile.mirrorX = character.mirrorX
     tile.position = pos + picOffset + float2(0.0, runningOffset) + zOffset
     tile.kind = character.kind
+    tile.color = character.color
+    tile.anim = character.anim
 
     if character.on_leash && character.follow_player_on_leash
         var from_pos = character.position
@@ -735,6 +937,13 @@ def draw_character(character : Character?)
         line(from_pos.x, from_pos.y, to_pos.x, to_pos.y, 0xff333333)
         pass
     
+    if character.carry_item != TileKind NONE
+        var carryTile = tile
+        carryTile.anim.kind = AnimKind NONE
+        carryTile.kind = character.carry_item
+        carryTile.z += 1.2
+        add_to_draw_queue(carryTile, 0)
+
     add_to_draw_queue(tile, 0)
 
 def draw_tile_highlight(tile : Tile)
@@ -761,13 +970,17 @@ def draw_grid(color : uint)
             line(pos2A.x, pos2A.y, pos2B.x, pos2B.y, color)
 
 
-def draw_ui()
 
-    var health = player.health
-    var hunger = player.hunger
+def draw_ui()
+    let max_health = 6
+    let max_hunger = 6
+
+    var health = roundi(player.health * float(max_health))
+    var hunger = max_hunger - roundi(player.hunger * float(max_hunger))
     var texture_rect : float4 
     var color = 0xffffffff
-    var size = float2(tileSizeX,tileSizeY) * 3.0
+    var ui_scale = 3.0
+    var size = float2(tileSizeX,tileSizeY) * ui_scale
     var time = get_time_after_start()
 
     //health
@@ -779,14 +992,14 @@ def draw_ui()
             texture_rect = get_tile_texture_rect(TileKind HEART_HALF)
         else
             texture_rect = get_tile_texture_rect(TileKind HEART_EMPTY)
-        var clip_space_pos = float2(10.0 + 16.0 * float(i),0.0)*3.0
+        var clip_space_pos = float2(10.0 + 16.0 * float(i),0.0)*ui_scale
 
         draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, 0.0, 0.5f,0.5f)
 
     //hunger
     for i in range(0, max_hunger / 2)
         var blinkFreq = 2.0
-        var isBlinking = player.isRunning && ((time * blinkFreq) - float(floori(time * blinkFreq))) > 0.5
+        var isBlinking = player.isRunning && !is_on_horse(player) && ((time * blinkFreq) - float(floori(time * blinkFreq))) > 0.5
         isBlinking = isBlinking && (max(0, hunger - 1) / 2 == i)
         color = isBlinking ?  0x33ffffff : 0xffffffff
         if hunger >= i * 2 + 2
@@ -795,14 +1008,39 @@ def draw_ui()
             texture_rect = get_tile_texture_rect(TileKind HUNGER_HALF)
         else
             texture_rect = get_tile_texture_rect(TileKind HUNGER_EMPTY)
-        var clip_space_pos = float2(9.5 + 16.0 * float(i),0.0 + 14.0)*3.0
+        var clip_space_pos = float2(9.5 + 16.0 * float(i),0.0 + 14.0)*ui_scale
 
         draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, 0.0, 0.5f,0.5f)
 
-    var y = 100
+    var y = int(30.0 * ui_scale)
     for kind, count in keys(player.items),values(player.items)
         text_out(10,y, "{kind} {count}", 0xffffffff)
         y += 20
+
+    text_out(10,y, "day_percent= {day_percent}", 0xffffffff)
+    y += 20
+    text_out(10,y, "rain_percent= {rain_percent}", 0xffffffff)
+    y += 20
+
+    if true
+        var blinkFreq = 2.0
+        var isBlinking = player.isRunning && !is_on_horse(player) && ((time * blinkFreq) - float(floori(time * blinkFreq))) > 0.5
+        if night_percent > 0.5
+            texture_rect = get_tile_texture_rect(TileKind UI_NIGHT)
+        else
+            texture_rect = get_tile_texture_rect(TileKind UI_DAY)
+        var clip_space_pos = float2(float(get_screen_width())/2.0, -ui_scale * 7.0)
+
+        draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, 0xffffffff, size, 0.0, 0.5f,0.0f)
+
+        if rain_percent > 0.5
+            texture_rect = get_tile_texture_rect(TileKind UI_RAIN)
+            draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, 0xffffffff, size, 0.0, 0.5f,0.0f)
+        
+        //texture_rect = get_tile_texture_rect(TileKind UI_BORDER)
+        //draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, 0xffffffff, size, 0.0, 0.0f,0.0f)
+
+
     pass
 
 var camFSizeX = 12.0
@@ -854,7 +1092,7 @@ def draw
             continue
         draw_character(ch)
     
-    if !is_on_horse()
+    if can_do_action()
         draw_tile_highlight(grid_ground->getTile(player.position))
 
     sort(drawTilesQueue, $(a,b)=>a.priority==b.priority && a.tile.position.y>b.tile.position.y || a.priority>b.priority)

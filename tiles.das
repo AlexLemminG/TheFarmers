@@ -35,12 +35,17 @@ enum TileKind
     HORSE
     SHEEP
     HUMAN_ON_HORSE
+    UI_NIGHT
+    UI_DAY
+    UI_RAIN
+    UI_BORDER
 
 enum AnimKind
     NONE
     SQUASH_AND_STRETCH
     TREE_FALL
     PICK
+    DEATH
 
 struct Anim
     kind : AnimKind
