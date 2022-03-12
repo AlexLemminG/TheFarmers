@@ -10,7 +10,7 @@ var rain_percent = 0.0
 var wheat_grow_timer = 0.0
 var wheat_grow_period = 5.0
 var draw_grid = false
-var map_size = int2(20,20)
+var map_size = int2(40,40)
 var npcCount = 10
 var hunger_per_hour = 60.0
 var health_loss_from_hunger_per_hour = 0.0
@@ -76,7 +76,7 @@ class Character
     carry_item : TileKind = TileKind NONE
 
 def is_big_item(kind : TileKind) : bool
-    return kind == TileKind WOOD
+    return kind == TileKind WOOD || kind == TileKind FLINT_STONE
 
 def GetPreferedSpeed(character : Character?) : float
     if character.kind == TileKind SHEEP
@@ -106,6 +106,7 @@ def die(var character : Character?)
     character.anim.kind = AnimKind DEATH
     character.anim.t = 0.0
     character.anim.stopT = 0.5
+
 
 // 'initialize' runs once when game starts and every hot-reload
 [export]
@@ -159,11 +160,13 @@ def initialize
                     else
                         item_tile.kind = TileKind TREE_RED
             else
-                if random_float(seed) > 0.8
+                if random_float(seed) > 0.9
                     //item_tile.z -= 6.0 / tileFloorHeightZ
                     item_tile.kind = TileKind CHEST_IRON
-                elif random_float(seed) > 0.95
+                elif random_float(seed) > 0.8
                     item_tile.kind = TileKind WHEAT_FULL
+                elif random_float(seed) > 0.6
+                    item_tile.kind = TileKind FLINT_STONE
 
             push_clone(grid_items.tiles, item_tile)
 
@@ -340,7 +343,7 @@ def pick(var tile : Tile)
     grid_items->setTile(tile)
 
 def is_pickable(tile : TileKind) : bool
-    return tile == TileKind WOOD || tile == TileKind WHEAT_FULL
+    return tile == TileKind WOOD || tile == TileKind WHEAT_FULL || tile == TileKind FLINT_STONE
 
 var prev_horse : AiCharacter?
 var prev_leashed : AiCharacter?
@@ -403,22 +406,59 @@ def get_nearest_npc(pos : float2) : AiCharacter?
 
     return nearestNpc
 
+def can_craft(character : Character?; itemTile : Tile) : bool
+    return itemTile.kind == TileKind WOOD && character.carry_item == TileKind FLINT_STONE
 
+def craft(var character : Character?; itemTile : Tile)
+    assert(can_craft(character, itemTile))    
+    var kind = itemTile.kind 
+
+    if kind == TileKind WOOD && character.carry_item == TileKind FLINT_STONE
+        kind = TileKind CAMPFIRE
+        character.carry_item = TileKind NONE
+
+    var tile = itemTile
+    tile.kind = kind
+    grid_items->setTile(tile)
+    pass
 
 def do_alt_action()
     _alt_action(true)
     pass
+
+let invalidTilePos = int2(-9999,-9999)
 
 def highlight_alt_action()
     if highlightedAltActionNpc != null
         set_highlighted(highlightedAltActionNpc, false)
         highlightedAltActionNpc = null
 
-    highlightedAltActionNpc = _alt_action(false)
+    if highlightedAltActionTilePos != invalidTilePos
+        set_highlighted(highlightedAltActionTilePos, false)
+        highlightedAltActionTilePos = invalidTilePos
+
+    var result = _alt_action(false)
+    highlightedAltActionNpc = result.target_char
     if highlightedAltActionNpc != null
         set_highlighted(highlightedAltActionNpc, true)
 
-    pass
+
+    if result.has_target_item_pos
+        highlightedAltActionTilePos = result.target_item_pos
+        set_highlighted(result.target_item_pos, true)
+
+var highlightedAltActionTilePos : int2
+def set_highlighted(tilePos : int2; is_highlighted : bool)
+    var tile = grid_items->getTileInt(tilePos)
+    if is_highlighted
+        if tile.color == 0xffffff80
+            return
+        tile.color = 0xffffff80
+    else
+        if tile.color == 0xffffffff
+            return
+        tile.color = 0xffffffff
+    grid_items->setTile(tile)
 
 var highlightedAltActionNpc : Character?
 def set_highlighted(var character : Character?; is_highlighted : bool)
@@ -427,17 +467,27 @@ def set_highlighted(var character : Character?; is_highlighted : bool)
     else
         character.color = 0xffffffff
 
-def _alt_action(exec : bool) : AiCharacter?
+struct AltActionResult
+    is_valid : bool
+    target_char : AiCharacter?
+    has_target_item_pos : bool
+    target_item_pos : int2
+
+def _alt_action(exec : bool) : AltActionResult
+    var result : AltActionResult
+
     if is_on_horse(player)
+        result.is_valid = true
         if exec
             unmount_horse()
-        return null
+        return result
     
     if prev_leashed != null
+        result.is_valid = true
         if exec
             unleash(prev_leashed)
             prev_leashed = null
-        return null
+        return result
 
     
     var npc = get_nearest_npc(player.position)
@@ -450,14 +500,28 @@ def _alt_action(exec : bool) : AiCharacter?
 
     if npc != null
         if npc.kind == TileKind HORSE
+            result.is_valid = true
+            result.target_char = npc
             if exec
                 mount_horse(npc)
-            return npc
+            return result
         elif npc.kind == TileKind SHEEP
+            result.target_char = npc
+            result.is_valid = true
             if exec
                 leash_to_player(npc)
-            return npc
-    return null
+            return result
+
+    var item = grid_items->getTile(player.position)
+    if can_craft(player, item)
+        result.is_valid = true
+        result.target_item_pos = item.position
+        result.has_target_item_pos = true
+        if exec
+            craft(player, item)
+        return result
+    
+    return result
 
 def do_action()
     _do_action(true)
@@ -466,8 +530,8 @@ def can_do_action() : bool
     return _do_action(false)
 
 var day_percent = 0.0
-var day_float = 0.5
-var gamedays_per_hour = 60.0
+var day_float = 0.3
+var gamedays_per_hour = 300.0
 def update_env(dt : float)
     day_float += dt * gamedays_per_hour / seconds_per_hour
     day_percent = day_float - float(trunci(day_float))
@@ -753,6 +817,18 @@ def get_tile_texture_rect(kind : TileKind) : float4
     elif kind == TileKind UI_RAIN
         x = 3
         y = 6
+    elif kind == TileKind CAMPFIRE
+        x = 4
+        y = 6
+    elif kind == TileKind CAMPFIRE_2
+        x = 5
+        y = 6
+    elif kind == TileKind CAMPFIRE_3
+        x = 6
+        y = 6
+    elif kind == TileKind FLINT_STONE
+        x = 8
+        y = 6
 
     return float4(float(x)*tileSizeX,float(y)*tileSizeY,tileSizeX,tileSizeY)
 
@@ -798,7 +874,7 @@ def processCollision(var charPos : float2&; tile : Tile)
 
     if tile.kind == TileKind TREE_GREEN || tile.kind == TileKind TREE_YELLOW || tile.kind == TileKind TREE_RED
         processCollisionCircle(deltaPos, 0.3)
-    elif tile.kind == TileKind CHEST_IRON || tile.kind == TileKind WOOD
+    elif tile.kind == TileKind CHEST_IRON || tile.kind == TileKind WOOD || tile.kind == TileKind CAMPFIRE
         deltaPos.y -= 0.12
         processCollisionCircle(deltaPos, 0.4)
         deltaPos.y += 0.12
@@ -850,7 +926,13 @@ def apply_anim(anim : Anim; var pos : float2&; var size : float2&; var angle : f
     pass
 
 def calc_light(pos : float2) : float
-    return 1.0 - night_percent * 0.5 - rain_percent * 0.2
+    var light = 1.0 - night_percent * 0.5 - rain_percent * 0.2
+    var intpos = int2(roundi(pos.x), roundi(pos.y))
+    for dx in range(-2, +3)
+        for dy in range(-2, +3)
+            if grid_items->getTileInt(int2(intpos.x + dx,intpos.y + dy)).kind == TileKind CAMPFIRE
+                light += 0.4 / (float(dx*dx + dy*dy) + 1.0)
+    return min(1.0, light)
 
 def get_pivot(kind : TileKind) : float2
     if kind == TileKind TREE_GREEN || kind == TileKind TREE_YELLOW || kind == TileKind TREE_RED
@@ -862,31 +944,47 @@ def get_pivot(kind : TileKind) : float2
     else
         return float2(0.5,0.5)
 
+def frac(f : float) : float
+    return f - float(int(f))
+
 def draw_tile(tile : TileFloat)
     var pos = tile.position
-    pos.y += tile.z * tileZToY
+    pos.y += tile.z * tileZToY + tile.offsetY
     var kind = tile.kind
     var color = tile.color
     var pivot = get_pivot(kind)
 
     var angle = 0.0
     var size = float2(1.0,1.0)
+    var mirrorX = tile.mirrorX
     apply_anim(tile.anim, pos, size, angle)
 
-    if tile.mirrorX
+    if kind == TileKind CAMPFIRE
+        let mult = 1.5
+        let t = (get_time_after_start() + (pos.x*3.156345 + pos.y*4.842756))*mult
+        let f = frac(t)
+        mirrorX = frac(t*0.5) > 0.5
+        if f > 0.333
+            kind = TileKind CAMPFIRE_2
+        if f > 0.666
+            kind = TileKind CAMPFIRE_3
+    else
+        color = lerp_colors_fix(0xff000000, color, calc_light(tile.position))//TODO smooth tile.pos for character
+
+    if mirrorX
         size.x = -size.x
         angle = -angle
 
     size *= float2(tileSizeX,tileSizeY) * camera.scale
     var texture_rect = get_tile_texture_rect(kind)
 
-    color = lerp_colors_fix(0xff000000, color, calc_light(pos))
+    color = lerp_colors_fix(0xff000000, color, calc_light(tile.position))
 
     if kind == TileKind PLANTED_SEEDS || kind == TileKind WHEAT_SMALL || kind == TileKind WHEAT_MEDIUM || kind == TileKind WHEAT_FULL
         pos.y -= 1.0
 
     var offset_from_pivot = float2((0.5 - pivot.x), (0.5 - pivot.y) * tileSizeY / tileFloorSizeY)
-    if !tile.mirrorX
+    if !mirrorX
         offset_from_pivot.x = -offset_from_pivot.x
     var clip_space_pos = camera->worldToScreen(pos + offset_from_pivot)
 
@@ -905,9 +1003,8 @@ def add_to_draw_queue(tile : TileFloat; priority : int)
     push(drawTilesQueue, t)
 
 def draw_item_tile(tile : TileFloat)
-    var picOffset = float2(0.0,1.0)
     var t = tile
-    t.position += picOffset
+    t.offsetY = 1.0
     add_to_draw_queue(t, 0)
 
 def is_dead(character : Character?) : bool
@@ -919,12 +1016,13 @@ def draw_character(character : Character?)
     var runningOffset = min(character.speed, 1.0) * 0.1 * abs(sin(10.0 * get_time_after_start() * (character.isRunning ? 2.0 : 1.0)))
     if is_dead(character)
         runningOffset = 0.0
-    var picOffset = float2(0.0,0.9)
-    var zOffset = float2(0.0,character.z * tileZToY)
+    var picOffsetY = 0.9
+    var zOffset = character.z * tileZToY
     var pos = character.position
     var anim : Anim
     tile.mirrorX = character.mirrorX
-    tile.position = pos + picOffset + float2(0.0, runningOffset) + zOffset
+    tile.position = pos
+    tile.offsetY = picOffsetY + runningOffset + zOffset
     tile.kind = character.kind
     tile.color = character.color
     tile.anim = character.anim

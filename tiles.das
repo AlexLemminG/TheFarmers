@@ -39,6 +39,10 @@ enum TileKind
     UI_DAY
     UI_RAIN
     UI_BORDER
+    CAMPFIRE
+    CAMPFIRE_2
+    CAMPFIRE_3
+    FLINT_STONE
 
 enum AnimKind
     NONE
@@ -66,6 +70,7 @@ struct Tile : TileBase
     
 struct TileFloat : TileBase
     position: float2
+    offsetY : float
 
 def to_tile_float(tile : Tile) : TileFloat
     var result : TileFloat
