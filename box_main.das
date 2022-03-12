@@ -3,14 +3,16 @@ require daslib/media
 require tiles
 options debugger            // uncomment for debug in VS Code
 require daslib/debug        // uncomment for debug in VS Code
-
+require fio
+require json
+require daslib/json_boost
 // tweakable settings
 var night_percent = 0.0
 var rain_percent = 0.0
 var wheat_grow_timer = 0.0
 var wheat_grow_period = 5.0
 var draw_grid = false
-var map_size = int2(40,40)
+var map_size = int2(20,20)
 var npcCount = 10
 var hunger_per_hour = 60.0
 var health_loss_from_hunger_per_hour = 0.0
@@ -39,6 +41,193 @@ var aiCharacters : array<AiCharacter?>
 
 var map_size_f = float2(float(map_size.x),float(map_size.y))
 var seed : int4
+
+struct SavedGrid
+    height : int
+    width : int
+    tiles : array<TileKind>
+
+struct SavedCharacter
+    position : float2
+    kind : TileKind
+    carry_item : TileKind
+
+def save_character(c : Character?) : JsonValue?
+    var ch : SavedCharacter
+    ch.position = c.position
+    ch.kind = c.kind
+    ch.carry_item = c.carry_item
+    return JV(ch)
+
+def load_character(var json : JsonValue?;var g : Character?)
+    var posX = ((json as _object)["position"] as _object)["x"] as _number
+    var posY = ((json as _object)["position"] as _object)["y"] as _number
+    g.position.x = float(posX)
+    g.position.y = float(posY)
+
+    var str = (json as _object)["kind"] as _string
+    g.kind = str_to_tile_kind[str]
+    str = (json as _object)["carry_item"] as _string
+    g.carry_item = str_to_tile_kind[str]
+    pass
+
+
+def generate_default_ground_grid(width : int; height : int) : Grid?
+    var grid = new Grid()
+    grid.width = width
+    grid.height = height
+
+    for x in range(0, width)
+        for y in range(0, height)
+            var tile = Tile()
+            tile.position = int2(x,y)
+            tile.kind = TileKind SOIL  
+            tile.z = float(random_int(seed) % int(tileFloorHeightZ) / 3) / tileFloorHeightZ
+            var tint = lerp(random_float(seed), 1.0, 0.8)
+            tile.color = make_color(tint)
+
+            push_clone(grid.tiles, tile)
+
+    return grid
+
+def generate_default_grid(width : int; height : int; var ground_grid : Grid?) : Grid?
+    var grid = new Grid()
+    grid.width = width
+    grid.height = height
+    for x in range(0, width)
+        for y in range(0, height)
+            var tile = Tile()
+            tile.position = int2(x,y)
+            tile.kind = TileKind NONE  
+            tile.z = ground_grid->getTileInt(tile.position).z
+            push_clone(grid.tiles, tile)
+    return grid
+
+def save_grid(g : Grid?) : JsonValue?
+    var grid : SavedGrid
+    grid.height = g.height
+    grid.width = g.width
+    for k in g.tiles
+        if k.anim.kind == AnimKind PICK
+            push(grid.tiles, TileKind NONE)
+        else
+            push(grid.tiles, k.kind)
+    return JV(grid)
+
+var str_to_tile_kind : table<string; TileKind>
+def load_grid(var json : JsonValue?; is_ground : bool) : Grid?
+    var grid : SavedGrid
+    //var h : Grid?
+    var heightF <- (json as _object)["height"] as _number
+    grid.height = roundi(heightF)
+    var widthF <- (json as _object)["width"] as _number
+    grid.width = roundi(widthF)
+    
+    var tilesJson <- (json as _object)["tiles"] as _array
+    for t in tilesJson
+        var s <- t as _string
+        push(grid.tiles, str_to_tile_kind[s])
+    
+    var g : Grid?
+    if is_ground
+        g = generate_default_ground_grid(grid.height, grid.width)
+        map_size.x = g.width
+        map_size.y = g.height
+        map_size_f = float2(float(map_size.x),float(map_size.y))
+    else
+        g = generate_default_grid(grid.height, grid.width, grid_ground)
+    
+    for idx in range(length(grid.tiles))
+        g.tiles[idx].kind = grid.tiles[idx]
+
+    return g
+
+def save()
+    var file = fopen("save.sav", "w")
+    if file == null
+        return
+
+    var json : JsonValue?
+    var grid : SavedGrid
+    grid.height = grid_ground.height
+    grid.width = grid_ground.width
+
+    for k in grid_ground.tiles
+        push(grid.tiles, k.kind)
+    
+    var t : table<string; JsonValue?>
+    json = JV(t)
+    (json as _object)["ground"] = save_grid(grid_ground)
+    (json as _object)["items"] = save_grid(grid_items)
+    (json as _object)["decals"] = save_grid(grid_ground_decals)
+    var arr : array<JsonValue?>
+    (json as _object)["characters"] = JV(arr)   
+    for character in characters
+        push((json as _object)["characters"] as _array, save_character(character))
+
+    (json as _object)["day_float"] = JV(day_float)   
+
+    fwrite(file, "{write_json(json)}")
+
+    fclose(file)
+    log("game saved")
+
+var dbg_msg : array<string>
+
+def log(str : string)
+    push(dbg_msg, str)
+    if length(dbg_msg) > 10
+        erase(dbg_msg, 0)
+
+
+def load()
+    //TODO player items if they still exist
+    var file = fopen("save.sav", "r")
+    if file == null
+        return
+
+    seed = int4(0,0,0,0)
+
+    clear(str_to_tile_kind)
+    for e in each_enum(type<TileKind>)
+        str_to_tile_kind["{e}"] =  e
+        pass
+    
+    var strJson : string
+    var c : __context
+    while !feof(file)
+        strJson += fgets(file) 
+    var errorStr : string
+    var json = read_json(strJson, errorStr)
+
+    grid_ground = load_grid((json as _object)["ground"], true)
+    grid_items = load_grid((json as _object)["items"], false)
+    grid_ground_decals = load_grid((json as _object)["decals"], false)
+
+    var isFirst = true
+    clear(characters)
+    clear(aiCharacters)
+    for js in (json as _object)["characters"] as _array
+        var character : Character?
+        if isFirst
+            player = new Player()
+            push(characters, player)
+            character = player
+            isFirst = false
+            load_character(js, character)
+        else
+            var aiChar = new AiCharacter()
+            push(characters, aiChar)
+            push(aiCharacters, aiChar)
+            character = aiChar
+            load_character(js, character)
+            
+            aiChar.target_position = aiChar.position
+    
+    day_float = float((json as _object)["day_float"] as _number)
+
+    fclose(file)
+    log("game loaded")
 
 def color_to_float4_fix(c: uint): float4
     let b = c & 0xFF
@@ -118,36 +307,19 @@ def initialize
     tiles <- create_managed_image("tiles.png") 
     camera.scale = 3.0
 
-    grid_ground.width = map_size.x
-    grid_ground.height = map_size.y
-
-    grid_ground_decals.width = map_size.x
-    grid_ground_decals.height = map_size.y
-
-    grid_items.width = map_size.x
-    grid_items.height = map_size.y
+    grid_ground = generate_default_ground_grid(map_size.x, map_size.y)
+    grid_items = generate_default_grid(map_size.x, map_size.y, grid_ground)
+    grid_ground_decals = generate_default_grid(map_size.x, map_size.y, grid_ground)
 
     for x in range(0, map_size.x)
         for y in range(0, map_size.y)
-            var tile = Tile()
-            tile.position = int2(x,y)
-            if random_float(seed) > 0.5
-                tile.z = 1.0
-            else
-                tile.z = 0.0
+            var idx = grid_ground->getIdxInt(int2(x,y))
+
+            var tile = grid_ground.tiles[idx]
             tile.kind = random_float(seed) > 0.1 ? TileKind GRASS : TileKind SOIL    
-            tile.z = float(random_int(seed) % int(tileFloorHeightZ) / 3) / tileFloorHeightZ
-            var tint = lerp(random_float(seed), 1.0, 0.8)
-            tile.color = make_color(tint)
+            grid_ground.tiles[idx] = tile
 
-            push_clone(grid_ground.tiles, tile)
-
-            var item_tile = Tile()
-            item_tile.position = int2(x,y)
-            item_tile.z = tile.z
-            item_tile.kind = TileKind NONE
-            tint = 1.0
-            item_tile.color = make_color(tint)
+            var item_tile = grid_items.tiles[idx]
             if tile.kind == TileKind GRASS
                 if random_float(seed) > 0.8
                     var r = random_float(seed)
@@ -165,19 +337,15 @@ def initialize
                     item_tile.kind = TileKind WHEAT_FULL
                 elif random_float(seed) > 0.6
                     item_tile.kind = TileKind FLINT_STONE
+            grid_items.tiles[idx] = item_tile
 
-            push_clone(grid_items.tiles, item_tile)
-
-            var decalTile = Tile()
-            decalTile.position = int2(x,y)
-            decalTile.z = tile.z
-
+            var decalTile = grid_ground_decals.tiles[idx] 
             if random_float(seed) > 0.95
                 if random_float(seed) > 0.2
                     decalTile.kind = TileKind DECAL_SMALL
                 else
                     decalTile.kind = TileKind DECAL_BIG
-            push_clone(grid_ground_decals.tiles, decalTile)
+            grid_ground_decals.tiles[idx] = decalTile
 
     player.position = float2(float(grid_ground.width), float(grid_ground.height )) / 2.0
     player.kind = TileKind HUMAN
@@ -230,6 +398,7 @@ def initialize
         var tile = grid_ground->getTileInt(int2(i - length(groundTilesList) / 2 + grid_ground.width / 2, 4 + grid_ground.height / 2))
         tile.kind = groundTilesList[i]
         grid_ground->setTile(tile)
+
 
 class Camera
     position : float2
@@ -712,6 +881,11 @@ def act(dt: float)
             do_alt_action()
         else
             do_action()
+
+    if get_key_down(VK_F6)
+        save()
+    if get_key_down(VK_F7)
+        load()
 
     player.velocity = clampLength(player.velocity, 1.0) * GetMaxSpeed(player)
     if get_key(VK_LSHIFT)
@@ -1254,6 +1428,11 @@ def draw_ui()
     y += 20
     text_out(10,y, "rain_percent= {rain_percent}", 0xffffffff)
     y += 20
+
+    
+    for i in range(length(dbg_msg))
+        text_out(10,y, dbg_msg[length(dbg_msg) - i-1], 0xffffffff)
+        y += 20
 
     if true
         var blinkFreq = 2.0
