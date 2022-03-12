@@ -6,6 +6,10 @@ require daslib/debug        // uncomment for debug in VS Code
 enum TileKind
     NONE
     GRASS
+    WATER
+    WATER_2
+    WATER_3
+    WATER_4
     SOIL
     HUMAN
     CHILD_A
@@ -43,6 +47,9 @@ enum TileKind
     CAMPFIRE_2
     CAMPFIRE_3
     FLINT_STONE
+    BUCKET_EMPTY
+    BUCKET_WITH_WATER
+    WOODEN_PLANE
 
 enum AnimKind
     NONE

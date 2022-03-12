@@ -75,8 +75,6 @@ class Character
     anim : Anim
     carry_item : TileKind = TileKind NONE
 
-def is_big_item(kind : TileKind) : bool
-    return kind == TileKind WOOD || kind == TileKind FLINT_STONE
 
 def GetPreferedSpeed(character : Character?) : float
     if character.kind == TileKind SHEEP
@@ -206,6 +204,33 @@ def initialize
         push(characters, npc)
         push(aiCharacters, npc)
 
+    var itemsList : array<TileKind>
+    push(itemsList, TileKind FLINT_STONE)
+    push(itemsList, TileKind CAMPFIRE)
+    push(itemsList, TileKind WOOD)
+    push(itemsList, TileKind WHEAT_FULL)
+    push(itemsList, TileKind BUCKET_EMPTY)
+    push(itemsList, TileKind BUCKET_WITH_WATER)
+
+    for i in range(length(itemsList))
+        var tile = grid_items->getTileInt(int2(i - length(itemsList) / 2 + grid_ground.width / 2, 1 + grid_ground.height / 2))
+        tile.kind = itemsList[i]
+        grid_items->setTile(tile)
+
+        
+    var groundTilesList : array<TileKind>
+    push(groundTilesList, TileKind GRASS)
+    push(groundTilesList, TileKind SOIL)
+    push(groundTilesList, TileKind WATER)
+    push(groundTilesList, TileKind WATER)
+    push(groundTilesList, TileKind WATER)
+    push(groundTilesList, TileKind WATER)
+    
+    for i in range(length(groundTilesList))
+        var tile = grid_ground->getTileInt(int2(i - length(groundTilesList) / 2 + grid_ground.width / 2, 4 + grid_ground.height / 2))
+        tile.kind = groundTilesList[i]
+        grid_ground->setTile(tile)
+
 class Camera
     position : float2
     scale : float
@@ -244,6 +269,10 @@ def is_ground_prepared1(pos : int2) : bool
 def is_ground_prepared2(pos : int2) : bool
     var decalsTile = grid_ground_decals->getTileInt(pos)
     return decalsTile.kind == TileKind DECAL_PREPARED_SOIL
+
+def can_prepare_ground_for_seeds1(pos : int2) : bool
+    var groundTile = grid_ground->getTileInt(pos)
+    return groundTile.kind == TileKind GRASS
 
 def prepare_ground_for_seeds1(pos : int2)
     var groundTile = grid_ground->getTileInt(pos)
@@ -342,8 +371,11 @@ def pick(var tile : Tile)
 
     grid_items->setTile(tile)
 
-def is_pickable(tile : TileKind) : bool
-    return tile == TileKind WOOD || tile == TileKind WHEAT_FULL || tile == TileKind FLINT_STONE
+def is_big_item(kind : TileKind) : bool
+    return kind == TileKind WOOD || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY
+
+def is_pickable(kind : TileKind) : bool
+    return kind == TileKind WOOD || kind == TileKind WHEAT_FULL || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY
 
 var prev_horse : AiCharacter?
 var prev_leashed : AiCharacter?
@@ -406,27 +438,79 @@ def get_nearest_npc(pos : float2) : AiCharacter?
 
     return nearestNpc
 
-def can_craft(character : Character?; itemTile : Tile) : bool
-    return itemTile.kind == TileKind WOOD && character.carry_item == TileKind FLINT_STONE
-
-def craft(var character : Character?; itemTile : Tile)
-    assert(can_craft(character, itemTile))    
+def _craft(var character : Character?; itemTile : Tile; exec : bool) : bool
     var kind = itemTile.kind 
+    var result = false
+    var groundTile = grid_ground->getTileInt(itemTile.position)
+    var groundKind = groundTile.kind 
 
     if kind == TileKind WOOD && character.carry_item == TileKind FLINT_STONE
-        kind = TileKind CAMPFIRE
-        character.carry_item = TileKind NONE
+        if exec
+            kind = TileKind CAMPFIRE
+            character.carry_item = TileKind NONE
+        result = true
+    elif kind == TileKind CAMPFIRE && character.carry_item == TileKind BUCKET_WITH_WATER
+        if exec
+            kind = TileKind WOOD
+            character.carry_item = TileKind BUCKET_EMPTY
+        result = true
+    elif groundKind == TileKind WATER && character.carry_item == TileKind BUCKET_EMPTY
+        if exec
+            character.carry_item = TileKind BUCKET_WITH_WATER
+        result = true
+    elif kind == TileKind NONE && groundKind == TileKind WATER && character.carry_item == TileKind WOOD
+        if exec
+            character.carry_item = TileKind NONE
+            groundKind = TileKind WOODEN_PLANE
+            kind = TileKind NONE
+        result = true
+    
+    if result
+        var tile = itemTile
+        tile.kind = kind
+        grid_items->setTile(tile)
 
-    var tile = itemTile
-    tile.kind = kind
-    grid_items->setTile(tile)
-    pass
+        if groundTile.kind != groundKind
+            groundTile.kind = groundKind
+            grid_ground->setTile(groundTile)
+    
+    return result
+
+def can_craft(var character : Character?; itemTile : Tile) : bool
+    return _craft(character, itemTile, false)
+
+def craft(var character : Character?; itemTile : Tile)
+    _craft(character, itemTile, true)
 
 def do_alt_action()
     _alt_action(true)
-    pass
+
+def can_do_alt_action() : bool
+    let result = _alt_action(false)
+    return result.is_valid
 
 let invalidTilePos = int2(-9999,-9999)
+
+def clear_alt_action_highlight()
+    if highlightedAltActionNpc != null
+        set_highlighted(highlightedAltActionNpc, false)
+        highlightedAltActionNpc = null
+
+    if highlightedAltActionTilePos != invalidTilePos
+        set_highlighted(highlightedAltActionTilePos, false)
+        highlightedAltActionTilePos = invalidTilePos
+
+def draw_alt_action_highlight()
+    let result = _alt_action(false)
+    if !result.is_valid
+        return
+
+    if result.has_target_item_pos
+        draw_tile_highlight(grid_ground->getTile(player.position))
+        
+    highlightedAltActionNpc = result.target_char
+    if highlightedAltActionNpc != null
+        set_highlighted(highlightedAltActionNpc, true)
 
 def highlight_alt_action()
     if highlightedAltActionNpc != null
@@ -441,7 +525,6 @@ def highlight_alt_action()
     highlightedAltActionNpc = result.target_char
     if highlightedAltActionNpc != null
         set_highlighted(highlightedAltActionNpc, true)
-
 
     if result.has_target_item_pos
         highlightedAltActionTilePos = result.target_item_pos
@@ -547,9 +630,10 @@ def _do_action(exec : bool) : bool
     if is_on_horse(player)
         return false
     var item = grid_items->getTile(player.position)
+    var groundTile = grid_ground->getTile(player.position)
 
     if player.carry_item != TileKind NONE
-        var on_empty_tile = item.kind == TileKind NONE
+        var on_empty_tile = item.kind == TileKind NONE && groundTile.kind != TileKind WATER
         if !on_empty_tile
             return false
         if exec
@@ -578,12 +662,14 @@ def _do_action(exec : bool) : bool
                     plant_seeds(item.position)
                 return true
         else
-            if exec
-                if is_ground_prepared1(item.position)
+            if is_ground_prepared1(item.position)
+                if exec
                     prepare_ground_for_seeds2(item.position)
-                else
+                return true
+            elif can_prepare_ground_for_seeds1(item.position)
+                if exec
                     prepare_ground_for_seeds1(item.position)
-            return true
+                return true
     elif int(item.kind) >= int(TileKind TREE_GREEN) && int(item.kind) <= int(TileKind TREE_RED)
         if exec
             cut_tree(item)
@@ -621,11 +707,11 @@ def act(dt: float)
     if get_key(VK_A)
         player.velocity.x -= 1.0
 
-    highlight_alt_action()
     if get_key_down(VK_SPACE)
-        do_action()
-    if get_key_down(VK_F)
-        do_alt_action()
+        if can_do_alt_action()
+            do_alt_action()
+        else
+            do_action()
 
     player.velocity = clampLength(player.velocity, 1.0) * GetMaxSpeed(player)
     if get_key(VK_LSHIFT)
@@ -661,9 +747,11 @@ def act(dt: float)
         for x in range(int(ch.position.x), int(ch.position.x+2.0))
             for y in range(int(ch.position.y), int(ch.position.y+2.0))
                 var tileToCollide = grid_items->getTile(float2(float(x), float(y)))
+                var tileToCollide2 = grid_ground->getTile(float2(float(x), float(y)))
                 ch.position.x = clamp(ch.position.x, -0.5,map_size_f.x - 0.6)
                 ch.position.y = clamp(ch.position.y, -0.5,map_size_f.y - 0.6)
                 processCollision(ch.position, tileToCollide)
+                processCollision(ch.position, tileToCollide2)
 
     for ch in aiCharacters
         if length(ch.target_position - ch.position) < 1.0
@@ -829,9 +917,34 @@ def get_tile_texture_rect(kind : TileKind) : float4
     elif kind == TileKind FLINT_STONE
         x = 8
         y = 6
+    elif kind == TileKind BUCKET_EMPTY
+        x = 16
+        y = 4
+    elif kind == TileKind BUCKET_WITH_WATER
+        x = 15
+        y = 4
+    elif kind == TileKind WATER
+        x = 0
+        y = 3
+    elif kind == TileKind WATER_2
+        x = 1
+        y = 3
+    elif kind == TileKind WATER_3
+        x = 2
+        y = 3
+    elif kind == TileKind WATER_4
+        x = 3
+        y = 3
+    elif kind == TileKind WOODEN_PLANE
+        x = 7
+        y = 4
 
     return float4(float(x)*tileSizeX,float(y)*tileSizeY,tileSizeX,tileSizeY)
 
+def processCollisionCircle(var deltaPos : float2&; radius : float; center : float2)
+    deltaPos -= center
+    processCollisionCircle(deltaPos, radius)
+    deltaPos += center
 def processCollisionCircle(var deltaPos : float2&; radius : float)
     var deltaPosIso = float2(deltaPos.x, deltaPos.y * topDownYToY)
     var len = length(deltaPosIso)
@@ -886,6 +999,13 @@ def processCollision(var charPos : float2&; tile : Tile)
         //deltaPos.y -= 0.08
         processCollisionRect(deltaPos, 0.2, 0.6)
         //deltaPos.y += 0.08
+    elif tile.kind == TileKind WATER
+        let offset = 0.25
+        let radius = 0.4
+        processCollisionCircle(deltaPos, radius, float2(offset,offset))
+        processCollisionCircle(deltaPos, radius, float2(-offset,offset))
+        processCollisionCircle(deltaPos, radius, float2(offset,-offset))
+        processCollisionCircle(deltaPos, radius, float2(-offset,-offset))
     
     charPos = float2(tile.position) + deltaPos
 
@@ -926,12 +1046,12 @@ def apply_anim(anim : Anim; var pos : float2&; var size : float2&; var angle : f
     pass
 
 def calc_light(pos : float2) : float
-    var light = 1.0 - night_percent * 0.5 - rain_percent * 0.2
+    var light = 1.0 - night_percent * 0.4 - rain_percent * 0.2
     var intpos = int2(roundi(pos.x), roundi(pos.y))
     for dx in range(-2, +3)
         for dy in range(-2, +3)
             if grid_items->getTileInt(int2(intpos.x + dx,intpos.y + dy)).kind == TileKind CAMPFIRE
-                light += 0.4 / (float(dx*dx + dy*dy) + 1.0)
+                light += 0.4 / (float(dx*dx + dy*dy) + 1.0) * (0.9 + sin(get_time_after_start()*7.0+float(intpos.x + dx)) * 0.05 + sin(get_time_after_start()*6.0 + float(intpos.y + dy)) * 0.05)
     return min(1.0, light)
 
 def get_pivot(kind : TileKind) : float2
@@ -970,6 +1090,18 @@ def draw_tile(tile : TileFloat)
             kind = TileKind CAMPFIRE_3
     else
         color = lerp_colors_fix(0xff000000, color, calc_light(tile.position))//TODO smooth tile.pos for character
+
+    if kind == TileKind WATER
+        pos.y -= tile.z * tileZToY + 0.2
+        let mult = 1.0
+        let t = (get_time_after_start())*mult
+        let f = frac(t)
+        if f > 0.75
+            kind = TileKind WATER_4
+        elif f > 0.5
+            kind = TileKind WATER_3
+        elif f > 0.25
+            kind = TileKind WATER_2
 
     if mirrorX
         size.x = -size.x
@@ -1192,8 +1324,13 @@ def draw
             continue
         draw_character(ch)
     
-    if can_do_action()
-        draw_tile_highlight(grid_ground->getTile(player.position))
+    clear_alt_action_highlight()
+    if can_do_alt_action()
+        draw_alt_action_highlight()
+    else
+        if can_do_action()
+            draw_tile_highlight(grid_ground->getTile(player.position))
+        
 
     sort(drawTilesQueue, $(a,b)=>a.priority==b.priority && a.tile.position.y>b.tile.position.y || a.priority>b.priority)
 
