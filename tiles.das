@@ -35,6 +35,12 @@ enum TileKind
     WHEAT_SMALL
     WHEAT_MEDIUM
     WHEAT_FULL
+    WHEAT_COLLECTED_1
+    WHEAT_COLLECTED_2
+    WHEAT_COLLECTED_3
+    WHEAT_COLLECTED_4
+    WHEAT_COLLECTED_5
+    WHEAT_COLLECTED_6
     GOLD
     HORSE
     SHEEP
@@ -99,6 +105,8 @@ class Grid
     def getIdx(pos : float2) : int
         return getIdxInt(int2(roundi(pos.x), roundi(pos.y)))
 
+    def getIntPos(pos : float2) : int2
+        return int2(roundi(pos.x), roundi(pos.y))
 
     def setTile(tile : Tile)
         var idx = getIdxInt(tile.position)

@@ -42,6 +42,10 @@ var aiCharacters : array<AiCharacter?>
 var map_size_f = float2(float(map_size.x),float(map_size.y))
 var seed : int4
 
+var time_scale = 1.0
+
+let dbg_pathfinding = false
+
 struct SavedGrid
     height : int
     width : int
@@ -379,6 +383,12 @@ def initialize
     push(itemsList, TileKind WHEAT_FULL)
     push(itemsList, TileKind BUCKET_EMPTY)
     push(itemsList, TileKind BUCKET_WITH_WATER)
+    push(itemsList, TileKind WHEAT_COLLECTED_1)
+    push(itemsList, TileKind WHEAT_COLLECTED_2)
+    push(itemsList, TileKind WHEAT_COLLECTED_3)
+    push(itemsList, TileKind WHEAT_COLLECTED_4)
+    push(itemsList, TileKind WHEAT_COLLECTED_5)
+    push(itemsList, TileKind WHEAT_COLLECTED_6)
 
     for i in range(length(itemsList))
         var tile = grid_items->getTileInt(int2(i - length(itemsList) / 2 + grid_ground.width / 2, 1 + grid_ground.height / 2))
@@ -470,10 +480,14 @@ def unprepare_ground_for_seeds2(pos : int2)
     grid_ground_decals->setTile(decalsTile)
 
 def plant_seeds(pos : int2)
+    if is_collected_wheat(player.carry_item)
+        player.carry_item = get_wheat_from_count(get_wheat_count(player.carry_item) - 1)
+    else
+        assert(false)
+
     var tile = grid_items->getTileInt(pos)
     tile.kind = TileKind PLANTED_SEEDS
     grid_items->setTile(tile)
-    player.items[TileKind WHEAT_FULL] -= 1
 
 def open_chest(var chest : Tile)
     if random_float(seed) > 0.5
@@ -518,6 +532,38 @@ def item_count_per_tile(kind : TileKind) : int
         return 2
     return 1
 
+def get_wheat_count(a: TileKind) : int
+    return int(a) - int(TileKind WHEAT_COLLECTED_1) + 1
+
+def get_wheat_from_count(a: int) : TileKind
+    if a == 0
+        return TileKind NONE
+    if a == 1
+        return TileKind WHEAT_COLLECTED_1
+    if a == 2
+        return TileKind WHEAT_COLLECTED_2
+    if a == 3
+        return TileKind WHEAT_COLLECTED_3
+    if a == 4
+        return TileKind WHEAT_COLLECTED_4
+    if a == 5
+        return TileKind WHEAT_COLLECTED_5
+    if a == 6
+        return TileKind WHEAT_COLLECTED_6
+    assert(false)
+    return TileKind NONE
+
+def add_wheat(a : TileKind; b : TileKind) : TileKind
+    var s = get_wheat_count(a) + get_wheat_count(b)
+    return get_wheat_from_count(min(s, 6))
+
+def add_wheat_reminder(a : TileKind; b : TileKind) : TileKind
+    var s = get_wheat_count(a) + get_wheat_count(b)
+    return get_wheat_from_count(s - min(s, 6))
+
+def is_collected_wheat(kind : TileKind) : bool
+    return int(kind) >= int(TileKind WHEAT_COLLECTED_1) && int(kind) <= int(TileKind WHEAT_COLLECTED_6)
+
 def pick(var tile : Tile)
     if tile.anim.kind != AnimKind NONE
         return
@@ -529,9 +575,16 @@ def pick(var tile : Tile)
     
     if is_big_item(tile.kind)
         if player.carry_item != TileKind NONE
-            drop(player.carry_item, tile.position)
-        player.carry_item = tile.kind
-        tile.kind = TileKind NONE
+            if is_collected_wheat(kind) && is_collected_wheat(player.carry_item)
+                player.carry_item = add_wheat(kind, player.carry_item)
+                tile.kind = add_wheat_reminder(kind, player.carry_item)
+            else
+                drop(player.carry_item, tile.position)
+                player.carry_item = kind
+                tile.kind = TileKind NONE
+        else
+            player.carry_item = kind
+            tile.kind = TileKind NONE
     else
         player.items[tile.kind] += item_count_per_tile(tile.kind)
         tile.anim.kind = AnimKind PICK
@@ -541,10 +594,10 @@ def pick(var tile : Tile)
     grid_items->setTile(tile)
 
 def is_big_item(kind : TileKind) : bool
-    return kind == TileKind WOOD || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY
+    return kind == TileKind WOOD || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY || is_collected_wheat(kind)
 
 def is_pickable(kind : TileKind) : bool
-    return kind == TileKind WOOD || kind == TileKind WHEAT_FULL || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY
+    return kind == TileKind WOOD || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY || is_collected_wheat(kind)
 
 var prev_horse : AiCharacter?
 var prev_leashed : AiCharacter?
@@ -632,6 +685,26 @@ def _craft(var character : Character?; itemTile : Tile; exec : bool) : bool
             character.carry_item = TileKind NONE
             groundKind = TileKind WOODEN_PLANE
             kind = TileKind NONE
+        result = true
+    elif is_collected_wheat(kind) && is_collected_wheat(character.carry_item)
+        var sum = add_wheat(kind, character.carry_item)
+        var reminder = add_wheat_reminder(kind, character.carry_item)
+        if sum == character.carry_item
+            result = false
+        else
+            result = true
+            if exec
+                character.carry_item = sum
+                kind = reminder
+    elif is_collected_wheat(character.carry_item) && is_ground_prepared1(itemTile.position) && is_ground_prepared2(itemTile.position) && itemTile.kind == TileKind NONE
+        if exec
+            character.carry_item = get_wheat_from_count(get_wheat_count(character.carry_item) - 1)
+            kind = TileKind PLANTED_SEEDS
+        result = true
+    elif kind == TileKind WHEAT_FULL && character.carry_item == TileKind NONE
+        if exec
+            kind = TileKind WHEAT_COLLECTED_2
+            unprepare_ground_for_seeds2(itemTile.position)
         result = true
     
     if result
@@ -747,7 +820,7 @@ def _alt_action(exec : bool) : AltActionResult
         var pp = player.position
         var np = npc.position
         var l = length(np - pp)
-        if l > 1.0
+        if l > 0.5
             npc = null
 
     if npc != null
@@ -826,7 +899,7 @@ def _do_action(exec : bool) : bool
         return true
     elif item.kind == TileKind NONE
         if is_ground_prepared1(item.position) && is_ground_prepared2(item.position)
-            if player.items[TileKind WHEAT_FULL] > 0
+            if is_collected_wheat(player.carry_item)
                 if exec
                     plant_seeds(item.position)
                 return true
@@ -858,9 +931,23 @@ def handle_anim_finished(var tile : Tile&)
         tile.kind = TileKind NONE
     tile.anim.kind = AnimKind NONE
 
+def get_nearest_walkable(pos : float2) : int2
+    var minDist = 10.0
+    var posInt = grid_ground->getIntPos(pos)
+    var bestPos = posInt
+    for dx in range(-1, 2)
+        for dy in range(-1, 2)
+            if is_walkable(posInt + int2(dx,dy))
+                var dist = length(pos - float2(posInt + int2(dx,dy)))
+                if dist < minDist
+                    bestPos = posInt + int2(dx,dy)
+                    minDist = dist
+    return bestPos
+
 [export]
-def act(dt: float)
-    set_window_title("wasisdasbox {int(1.0/dt)}")
+def act(_dt: float)
+    let dt = _dt * time_scale
+    set_window_title("wasisdasbox {int(1.0/_dt)}")
     if get_key(VK_ESCAPE)
         schedule_quit_game()
 
@@ -929,8 +1016,10 @@ def act(dt: float)
 
     for ch in aiCharacters
         if length(ch.target_position - ch.position) < 1.0
-            ch.target_position = float2(random_float(seed) * float(map_size.x), random_float(seed) * float(map_size.y))
+            ch.target_position = float2(random_float(seed) * float(map_size.x-1), random_float(seed) * float(map_size.y-1))
             continue
+        while !is_walkable(grid_ground->getIntPos(ch.target_position))
+            ch.target_position = float2(random_float(seed) * float(map_size.x), random_float(seed) * float(map_size.y))
         var preferedSpeed = GetPreferedSpeed(ch)
         if ch.on_leash
             var leash_length = 1.0
@@ -940,7 +1029,18 @@ def act(dt: float)
             else
                 ch.target_position = ch.position
             preferedSpeed = min(length(delta), GetMaxSpeed(ch))
-        ch.velocity = lerp(ch.velocity, clampLength(ch.target_position - ch.position, 1.f) * preferedSpeed, 3.0 * dt)
+
+        var immediateTargetPos : float2
+        immediateTargetPos = ch.target_position
+        if !is_walkable(grid_ground->getIntPos(ch.position))
+            immediateTargetPos = float2(get_nearest_walkable(ch.position))
+        elif length(ch.target_position - ch.position) > 1.0
+            var path : array<int2>
+            path <- a_star(grid_ground->getIntPos(ch.position), grid_ground->getIntPos(ch.target_position))
+            if length(path) > 1
+                //TODO relax path to remove zig-zags
+                immediateTargetPos = float2(path[1]) + (grid_items->getTileInt(path[1]).kind == TileKind NONE ? float2(0.0) : float2(0.25, 0.25))
+        ch.velocity = lerp(ch.velocity, clampLength((immediateTargetPos - ch.position)*2.0, 1.f) * preferedSpeed, 3.0 * dt)
 
 
     camera.position = lerp(camera.position, player.position, dt * 3.0) 
@@ -1112,6 +1212,24 @@ def get_tile_texture_rect(kind : TileKind) : float4
     elif kind == TileKind WOODEN_PLANE
         x = 7
         y = 4
+    elif kind == TileKind WHEAT_COLLECTED_1
+        x = 9
+        y = 6
+    elif kind == TileKind WHEAT_COLLECTED_2
+        x = 10
+        y = 6
+    elif kind == TileKind WHEAT_COLLECTED_3
+        x = 10
+        y = 6
+    elif kind == TileKind WHEAT_COLLECTED_4
+        x = 10
+        y = 6
+    elif kind == TileKind WHEAT_COLLECTED_5
+        x = 10
+        y = 6
+    elif kind == TileKind WHEAT_COLLECTED_6
+        x = 11
+        y = 6
 
     return float4(float(x)*tileSizeX,float(y)*tileSizeY,tileSizeX,tileSizeY)
 
@@ -1180,6 +1298,10 @@ def processCollision(var charPos : float2&; tile : Tile)
         processCollisionCircle(deltaPos, radius, float2(-offset,offset))
         processCollisionCircle(deltaPos, radius, float2(offset,-offset))
         processCollisionCircle(deltaPos, radius, float2(-offset,-offset))
+    elif (tile.kind) == (TileKind WHEAT_COLLECTED_6)
+        deltaPos.y -= 0.12
+        processCollisionCircle(deltaPos, 0.4)
+        deltaPos.y += 0.12
     
     charPos = float2(tile.position) + deltaPos
 
@@ -1238,6 +1360,101 @@ def get_pivot(kind : TileKind) : float2
     else
         return float2(0.5,0.5)
 
+struct IntPosWithDist
+    pos : int2
+    dist : int
+    expectedDist : float
+
+def dist(from : int2; to : int2) : float
+    return length(float2(from - to))
+
+def insert_sorted(var arr : array<IntPosWithDist>; val : IntPosWithDist)
+    var i = length(arr)
+    while i > 0
+        if arr[i-1].expectedDist > val.expectedDist
+            push(arr, val, i)
+            break
+        i--
+    if i == 0
+        push(arr, val, 0)
+
+def is_walkable(pos : int2) : bool
+    return grid_ground->getTileInt(pos).kind != TileKind WATER
+
+def a_star(from : int2; to : int2) : array<int2>
+    var result : array<int2>
+    if from == to
+        push(result, to)
+        return <- result
+    var r : table<int2; int>
+
+    var wip : array<IntPosWithDist>
+    var posWithDist : IntPosWithDist
+    posWithDist.pos = from
+    posWithDist.dist = 0
+    posWithDist.expectedDist = dist(from, to)
+    push(wip, posWithDist)
+    r[from] = 0
+
+    var found_path = false
+    var iterations = 0
+    let max_iteration = 300
+    while !found_path && length(wip) > 0 && iterations < max_iteration
+        iterations++
+        var current = wip[length(wip)-1]
+        pop(wip)
+        for dd in range(0, 4)
+            let dx = (dd - 1) % 2
+            let dy = (dd - 2) % 2
+            posWithDist.pos = current.pos + int2(dx,dy)
+            posWithDist.dist = current.dist + 1
+            posWithDist.expectedDist = float(posWithDist.dist) + dist(posWithDist.pos, to)
+            if key_exists(r, posWithDist.pos) && r[posWithDist.pos] <= posWithDist.dist || !is_walkable(posWithDist.pos)
+                continue
+            r[posWithDist.pos] = posWithDist.dist
+            insert_sorted(wip, posWithDist)
+            var screenPos = camera->worldToScreen(float2(posWithDist.pos))
+            //text_out(screenPos.x,screenPos.y, "{posWithDist.dist}", 0xffffffff)
+            //push(result, posWithDist.pos)
+            if posWithDist.pos == to
+                found_path = true
+                break
+
+        //push(result, current.pos)
+        //found_path = true
+    iterations = 0
+    if found_path
+        var currentPos = to
+        var currentDist = r[to]
+        push(result, currentPos)
+        while currentPos != from && iterations < max_iteration
+            iterations++
+            var minPos : int2
+            var minDist = 100000.0
+            var dx : int
+            var dy : int
+            for dd in range(0, 4)
+                if iterations % 2 == 0
+                    dx = dd / 2 * (dd == 3 ? 1 : -1)
+                    dy = (dd == 0 ? 1 : -1) * (dd/2 - 1)
+                else
+                    dy = dd / 2 * (dd == 3 ? 1 : -1)
+                    dx = (dd == 0 ? 1 : -1) * (dd/2 - 1)
+                let pos = currentPos + int2(dx, dy)
+                if key_exists(r, pos) && r[pos] < currentDist
+                    currentPos = pos
+                    currentDist = r[pos]
+                    break
+            
+            //var screenPos = camera->worldToScreen(float2(currentPos))
+            //text_out(screenPos.x,screenPos.y, "{r[currentPos]}", 0xffffffff)
+            push(result, currentPos, 0)
+        
+        pass
+
+    //log("{length(result)}")
+    return <- result
+
 def frac(f : float) : float
     return f - float(int(f))
 
@@ -1264,7 +1481,7 @@ def draw_tile(tile : TileFloat)
             kind = TileKind CAMPFIRE_3
     else
         color = lerp_colors_fix(0xff000000, color, calc_light(tile.position))//TODO smooth tile.pos for character
-
+    
     if kind == TileKind WATER
         pos.y -= tile.z * tileZToY + 0.2
         let mult = 1.0
@@ -1276,6 +1493,8 @@ def draw_tile(tile : TileFloat)
             kind = TileKind WATER_3
         elif f > 0.25
             kind = TileKind WATER_2
+
+
 
     if mirrorX
         size.x = -size.x
@@ -1293,6 +1512,9 @@ def draw_tile(tile : TileFloat)
     if !mirrorX
         offset_from_pivot.x = -offset_from_pivot.x
     var clip_space_pos = camera->worldToScreen(pos + offset_from_pivot)
+
+    if is_collected_wheat(kind)
+        text_out(clip_space_pos.x+20.0,clip_space_pos.y + 20.0, "{get_wheat_count(kind)}", color)
 
     draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, angle, pivot.x, pivot.y)
 
@@ -1502,7 +1724,15 @@ def draw
         if is_culled(ch.position)
             continue
         draw_character(ch)
-    
+
+    if dbg_pathfinding
+        for ch in aiCharacters
+            if length(ch.target_position - ch.position) > 1.0
+                var path : array<int2>
+                path <- a_star(grid_ground->getIntPos(ch.position), grid_ground->getIntPos(ch.target_position))
+        var path <- a_star(grid_ground->getTile(player.position).position, int2(grid_ground.width / 2, grid_ground.height / 2+5))
+        for pos in path
+            draw_tile_highlight(grid_ground->getTileInt(pos))
     clear_alt_action_highlight()
     if can_do_alt_action()
         draw_alt_action_highlight()
@@ -1510,6 +1740,9 @@ def draw
         if can_do_action()
             draw_tile_highlight(grid_ground->getTile(player.position))
         
+    
+
+
 
     sort(drawTilesQueue, $(a,b)=>a.priority==b.priority && a.tile.position.y>b.tile.position.y || a.priority>b.priority)
 
