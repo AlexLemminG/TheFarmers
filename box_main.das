@@ -14,8 +14,9 @@ var wheat_grow_period = 5.0
 var draw_grid = false
 var map_size = int2(20,20)
 var npcCount = 10
-var hunger_per_hour = 60.0
+var hunger_per_hour = 600.0
 var health_loss_from_hunger_per_hour = 0.0
+var health_gain_from_no_hunger_per_hour = 600.0
 
 var seconds_per_hour = 3600.0
 var hours_per_second = 1.0 / seconds_per_hour
@@ -271,7 +272,7 @@ class Character
 
 def GetPreferedSpeed(character : Character?) : float
     if character.kind == TileKind SHEEP
-        return 0.5
+        return 0.2
     elif character.kind == TileKind HORSE
         return 2.0
     else
@@ -389,6 +390,11 @@ def initialize
     push(itemsList, TileKind WHEAT_COLLECTED_4)
     push(itemsList, TileKind WHEAT_COLLECTED_5)
     push(itemsList, TileKind WHEAT_COLLECTED_6)
+    push(itemsList, TileKind COAL)
+    push(itemsList, TileKind FENCE)
+    push(itemsList, TileKind FENCE)
+    push(itemsList, TileKind BUSH)
+    push(itemsList, TileKind BUSH_WITH_BERRIES)
 
     for i in range(length(itemsList))
         var tile = grid_items->getTileInt(int2(i - length(itemsList) / 2 + grid_ground.width / 2, 1 + grid_ground.height / 2))
@@ -594,10 +600,10 @@ def pick(var tile : Tile)
     grid_items->setTile(tile)
 
 def is_big_item(kind : TileKind) : bool
-    return kind == TileKind WOOD || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY || is_collected_wheat(kind)
+    return kind == TileKind WOOD || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY || is_collected_wheat(kind) || kind == TileKind COAL
 
 def is_pickable(kind : TileKind) : bool
-    return kind == TileKind WOOD || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY || is_collected_wheat(kind)
+    return kind == TileKind WOOD || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY || is_collected_wheat(kind) || kind == TileKind COAL
 
 var prev_horse : AiCharacter?
 var prev_leashed : AiCharacter?
@@ -650,7 +656,7 @@ def leash_to_player(var npc : AiCharacter?)
     prev_leashed = npc
 
 def get_nearest_npc(pos : float2) : AiCharacter?
-    var nearestDist = 100.0
+    var nearestDist = 0.5
     var nearestNpc : AiCharacter?
     for npc in aiCharacters
         var dist = length(npc.position - pos)
@@ -669,11 +675,11 @@ def _craft(var character : Character?; itemTile : Tile; exec : bool) : bool
     if kind == TileKind WOOD && character.carry_item == TileKind FLINT_STONE
         if exec
             kind = TileKind CAMPFIRE
-            character.carry_item = TileKind NONE
+            //character.carry_item = TileKind NONE
         result = true
     elif kind == TileKind CAMPFIRE && character.carry_item == TileKind BUCKET_WITH_WATER
         if exec
-            kind = TileKind WOOD
+            kind = TileKind COAL
             character.carry_item = TileKind BUCKET_EMPTY
         result = true
     elif groundKind == TileKind WATER && character.carry_item == TileKind BUCKET_EMPTY
@@ -706,7 +712,25 @@ def _craft(var character : Character?; itemTile : Tile; exec : bool) : bool
             kind = TileKind WHEAT_COLLECTED_2
             unprepare_ground_for_seeds2(itemTile.position)
         result = true
-    
+    elif kind == TileKind WOOD && character.carry_item == TileKind WOOD
+        if exec
+            kind = TileKind FENCE
+            character.carry_item = TileKind NONE
+        result = true
+    elif kind == TileKind BUSH_WITH_BERRIES && character.carry_item == TileKind NONE
+        if exec
+            kind = TileKind BUSH
+            character.hunger = max(0.0, character.hunger - 1.0)
+        result = true
+    elif kind == TileKind BUSH && character.carry_item == TileKind NONE
+        if exec
+            kind = TileKind NONE
+        result = true
+    elif kind == TileKind FENCE && character.carry_item == TileKind NONE
+        if exec
+            kind = TileKind NONE
+            character.carry_item = TileKind FENCE
+        result = true
     if result
         var tile = itemTile
         tile.kind = kind
@@ -800,7 +824,8 @@ struct AltActionResult
 
 def _alt_action(exec : bool) : AltActionResult
     var result : AltActionResult
-
+    if is_dead(player)
+        return result
     if is_on_horse(player)
         result.is_valid = true
         if exec
@@ -816,12 +841,6 @@ def _alt_action(exec : bool) : AltActionResult
 
     
     var npc = get_nearest_npc(player.position)
-    if npc != null
-        var pp = player.position
-        var np = npc.position
-        var l = length(np - pp)
-        if l > 0.5
-            npc = null
 
     if npc != null
         if npc.kind == TileKind HORSE
@@ -869,7 +888,7 @@ def update_env(dt : float)
     rain_percent = lerp(rain_percent, is_rainy ? 1.0 : 0.0, dt)
 
 def _do_action(exec : bool) : bool
-    if is_on_horse(player)
+    if is_on_horse(player) || is_dead(player)
         return false
     var item = grid_items->getTile(player.position)
     var groundTile = grid_ground->getTile(player.position)
@@ -937,7 +956,7 @@ def get_nearest_walkable(pos : float2) : int2
     var bestPos = posInt
     for dx in range(-1, 2)
         for dy in range(-1, 2)
-            if is_walkable(posInt + int2(dx,dy))
+            if is_walkable_for_a_star(posInt + int2(dx,dy))
                 var dist = length(pos - float2(posInt + int2(dx,dy)))
                 if dist < minDist
                     bestPos = posInt + int2(dx,dy)
@@ -994,6 +1013,8 @@ def act(_dt: float)
 
         if ch.hunger == 1.0
             ch.health = max(0.0, ch.health - dt * health_loss_from_hunger_per_hour * hours_per_second)
+        else
+            ch.health = min(1.0, ch.health + dt * health_gain_from_no_hunger_per_hour * hours_per_second)
 
 
         ch.position += ch.velocity * dt
@@ -1018,7 +1039,7 @@ def act(_dt: float)
         if length(ch.target_position - ch.position) < 1.0
             ch.target_position = float2(random_float(seed) * float(map_size.x-1), random_float(seed) * float(map_size.y-1))
             continue
-        while !is_walkable(grid_ground->getIntPos(ch.target_position))
+        while !is_walkable_for_a_star(grid_ground->getIntPos(ch.target_position))
             ch.target_position = float2(random_float(seed) * float(map_size.x), random_float(seed) * float(map_size.y))
         var preferedSpeed = GetPreferedSpeed(ch)
         if ch.on_leash
@@ -1032,7 +1053,7 @@ def act(_dt: float)
 
         var immediateTargetPos : float2
         immediateTargetPos = ch.target_position
-        if !is_walkable(grid_ground->getIntPos(ch.position))
+        if !is_walkable_for_a_star(grid_ground->getIntPos(ch.position)) && !ch.on_leash
             immediateTargetPos = float2(get_nearest_walkable(ch.position))
         elif length(ch.target_position - ch.position) > 1.0
             var path : array<int2>
@@ -1040,6 +1061,8 @@ def act(_dt: float)
             if length(path) > 1
                 //TODO relax path to remove zig-zags
                 immediateTargetPos = float2(path[1]) + (grid_items->getTileInt(path[1]).kind == TileKind NONE ? float2(0.0) : float2(0.25, 0.25))
+            elif !ch.on_leash
+                immediateTargetPos = ch.position
         ch.velocity = lerp(ch.velocity, clampLength((immediateTargetPos - ch.position)*2.0, 1.f) * preferedSpeed, 3.0 * dt)
 
 
@@ -1114,8 +1137,11 @@ def get_tile_texture_rect(kind : TileKind) : float4
         x = 17
         y = 3
     elif kind == TileKind FENCE_V
-        x = 14
-        y = 3
+        x = 13
+        y = 6
+    elif kind == TileKind FENCE
+        x = 15
+        y = 6
     elif kind == TileKind DECAL_PREPARED_SOIL
         x = 13
         y = 5
@@ -1230,6 +1256,15 @@ def get_tile_texture_rect(kind : TileKind) : float4
     elif kind == TileKind WHEAT_COLLECTED_6
         x = 11
         y = 6
+    elif kind == TileKind COAL
+        x = 12
+        y = 6
+    elif kind == TileKind BUSH
+        x = 13
+        y = 4
+    elif kind == TileKind BUSH_WITH_BERRIES
+        x = 14
+        y = 6
 
     return float4(float(x)*tileSizeX,float(y)*tileSizeY,tileSizeX,tileSizeY)
 
@@ -1276,21 +1311,22 @@ def processCollisionRect(var deltaPos : float2&; halfSizeX : float; halfSizeY : 
 
 def processCollision(var charPos : float2&; tile : Tile)
     var deltaPos = charPos - float2(tile.position)
-
+    log("{tile.position}")
     if tile.kind == TileKind TREE_GREEN || tile.kind == TileKind TREE_YELLOW || tile.kind == TileKind TREE_RED
         processCollisionCircle(deltaPos, 0.3)
     elif tile.kind == TileKind CHEST_IRON || tile.kind == TileKind WOOD || tile.kind == TileKind CAMPFIRE
         deltaPos.y -= 0.12
         processCollisionCircle(deltaPos, 0.4)
         deltaPos.y += 0.12
-    elif tile.kind == TileKind FENCE_H
-        deltaPos.y -= 0.08
-        processCollisionRect(deltaPos, 0.6, 0.2)
-        deltaPos.y += 0.08
-    elif tile.kind == TileKind FENCE_V
-        //deltaPos.y -= 0.08
-        processCollisionRect(deltaPos, 0.2, 0.6)
-        //deltaPos.y += 0.08
+    elif tile.kind == TileKind FENCE
+        if grid_items->getTileInt(tile.position + int2(1, 0)).kind == TileKind FENCE
+            deltaPos.x -= 0.5
+            processCollisionRect(deltaPos, 0.55, 0.15)
+            deltaPos.x += 0.5
+        if grid_items->getTileInt(tile.position + int2(0, 1)).kind == TileKind FENCE
+            deltaPos.y -= 0.5
+            processCollisionRect(deltaPos, 0.15, 0.55)
+            deltaPos.y += 0.5
     elif tile.kind == TileKind WATER
         let offset = 0.25
         let radius = 0.4
@@ -1378,8 +1414,21 @@ def insert_sorted(var arr : array<IntPosWithDist>; val : IntPosWithDist)
     if i == 0
         push(arr, val, 0)
 
-def is_walkable(pos : int2) : bool
-    return grid_ground->getTileInt(pos).kind != TileKind WATER
+def is_fence(kind : TileKind) : bool
+    return kind == TileKind FENCE_H || kind == TileKind FENCE_V || kind == TileKind FENCE
+
+def is_walkable_for_a_star(pos : int2) : bool
+    if grid_ground->getTileInt(pos).kind == TileKind WATER
+        return false
+    var item = grid_items->getTileInt(pos).kind
+    if item == TileKind FENCE
+        return false
+    if grid_items->getTileInt(pos + int2(-1, 0)).kind == TileKind FENCE && grid_items->getTileInt(pos + int2(1, 0)).kind == TileKind FENCE
+        return false
+    if grid_items->getTileInt(pos + int2(0, -1)).kind == TileKind FENCE && grid_items->getTileInt(pos + int2(0, 1)).kind == TileKind FENCE
+        return false
+
+    return true
 
 def a_star(from : int2; to : int2) : array<int2>
     var result : array<int2>
@@ -1409,7 +1458,7 @@ def a_star(from : int2; to : int2) : array<int2>
             posWithDist.pos = current.pos + int2(dx,dy)
             posWithDist.dist = current.dist + 1
             posWithDist.expectedDist = float(posWithDist.dist) + dist(posWithDist.pos, to)
-            if key_exists(r, posWithDist.pos) && r[posWithDist.pos] <= posWithDist.dist || !is_walkable(posWithDist.pos)
+            if key_exists(r, posWithDist.pos) && r[posWithDist.pos] <= posWithDist.dist || !is_walkable_for_a_star(posWithDist.pos)
                 continue
             r[posWithDist.pos] = posWithDist.dist
             insert_sorted(wip, posWithDist)
@@ -1507,6 +1556,8 @@ def draw_tile(tile : TileFloat)
 
     if kind == TileKind PLANTED_SEEDS || kind == TileKind WHEAT_SMALL || kind == TileKind WHEAT_MEDIUM || kind == TileKind WHEAT_FULL
         pos.y -= 1.0
+    elif kind == TileKind FENCE_H
+        pos.x += 0.5
 
     var offset_from_pivot = float2((0.5 - pivot.x), (0.5 - pivot.y) * tileSizeY / tileFloorSizeY)
     if !mirrorX
@@ -1598,22 +1649,26 @@ def draw_grid(color : uint)
             line(pos1A.x, pos1A.y, pos1B.x, pos1B.y, color)
             line(pos2A.x, pos2A.y, pos2B.x, pos2B.y, color)
 
+var ui_scale = 3.0
+var ui_tile_size = float2(tileSizeX,tileSizeY) * ui_scale
 
-
-def draw_ui()
+def draw_character_stats(character : Character?; _pos : float2; invertX : bool)
     let max_health = 6
     let max_hunger = 6
-
-    var health = roundi(player.health * float(max_health))
-    var hunger = max_hunger - roundi(player.hunger * float(max_hunger))
-    var texture_rect : float4 
-    var color = 0xffffffff
-    var ui_scale = 3.0
-    var size = float2(tileSizeX,tileSizeY) * ui_scale
     var time = get_time_after_start()
 
-    //health
-    color = 0xffffffff
+    var texture_rect : float4 
+    var health = roundi(character.health * float(max_health))
+    var hunger = max_hunger - roundi(character.hunger * float(max_hunger))
+    var color = 0xffffffff
+    var deltaX = 16.0
+    var size = ui_tile_size 
+    var pos = _pos
+    if invertX
+        deltaX = -deltaX
+        //size.x = -size.x
+        pos.x = float(get_screen_width()) / ui_scale - pos.x
+
     for i in range(0, max_health / 2)
         if health >= i * 2 + 2
             texture_rect = get_tile_texture_rect(TileKind HEART_FULL)
@@ -1621,7 +1676,7 @@ def draw_ui()
             texture_rect = get_tile_texture_rect(TileKind HEART_HALF)
         else
             texture_rect = get_tile_texture_rect(TileKind HEART_EMPTY)
-        var clip_space_pos = float2(10.0 + 16.0 * float(i),0.0)*ui_scale
+        var clip_space_pos = float2(pos.x + deltaX * float(i),0.0 + pos.y)*ui_scale
 
         draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, 0.0, 0.5f,0.5f)
 
@@ -1637,9 +1692,29 @@ def draw_ui()
             texture_rect = get_tile_texture_rect(TileKind HUNGER_HALF)
         else
             texture_rect = get_tile_texture_rect(TileKind HUNGER_EMPTY)
-        var clip_space_pos = float2(9.5 + 16.0 * float(i),0.0 + 14.0)*ui_scale
+        var clip_space_pos = float2(pos.x - 0.5 + deltaX * float(i),0.0 + 14.0 + pos.y)*ui_scale
 
         draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, 0.0, 0.5f,0.5f)
+
+def draw_ui()
+    let max_health = 6
+    let max_hunger = 6
+
+    var health = roundi(player.health * float(max_health))
+    var hunger = max_hunger - roundi(player.hunger * float(max_hunger))
+    var texture_rect : float4 
+    var color = 0xffffffff
+    var size = float2(tileSizeX,tileSizeY) * ui_scale
+    var time = get_time_after_start()
+
+    draw_character_stats(player, float2(10.0,0.0), false)
+
+    var npc = get_nearest_npc(player.position)
+    if npc != null
+        draw_character_stats(npc, float2(10.0,0.0), true)
+
+    //health
+    color = 0xffffffff
 
     var y = int(30.0 * ui_scale)
     for kind, count in keys(player.items),values(player.items)
@@ -1692,6 +1767,24 @@ def is_culled(pos : float2) : bool
 def is_culled(pos : int2) : bool
     return abs(camera.position.x - float(pos.x)) * camera.scale > camFSizeX || abs(camera.position.y - float(pos.y)) * camera.scale > camFSizeY
 
+def draw_item_fence(tile : Tile)
+    var u = grid_items->getTileInt(tile.position + int2(0,1))
+    var d = grid_items->getTileInt(tile.position + int2(0,-1))
+    var l = grid_items->getTileInt(tile.position + int2(-1,0))
+    var r = grid_items->getTileInt(tile.position + int2(1,0))
+
+    var t = to_tile_float(tile)
+    if r.kind == TileKind FENCE
+        t.kind = TileKind FENCE_H
+        draw_item_tile(t)
+
+    if u.kind == TileKind FENCE
+        t.kind = TileKind FENCE_V
+        draw_item_tile(t)
+
+    if u.kind != TileKind FENCE && d.kind != TileKind FENCE && l.kind != TileKind FENCE && r.kind != TileKind FENCE
+        draw_item_tile(t)
+
 [export]
 def draw
     clear(drawTilesQueue)
@@ -1716,7 +1809,9 @@ def draw
         var iy = max_culled.y
         while iy >= min_culled.y
             var tile = grid_items->getTileInt(int2(ix, iy))
-            if tile.kind != TileKind NONE
+            if tile.kind == TileKind FENCE
+                draw_item_fence(tile)
+            elif tile.kind != TileKind NONE
                 draw_item_tile(to_tile_float(tile))
             iy -= 1
             

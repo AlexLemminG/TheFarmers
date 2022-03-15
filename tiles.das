@@ -20,6 +20,7 @@ enum TileKind
     TREE_RED
     CHEST_IRON
     TILE_SELECTION
+    FENCE
     FENCE_H
     FENCE_V
     DECAL_SMALL
@@ -56,6 +57,9 @@ enum TileKind
     BUCKET_EMPTY
     BUCKET_WITH_WATER
     WOODEN_PLANE
+    COAL
+    BUSH
+    BUSH_WITH_BERRIES
 
 enum AnimKind
     NONE
