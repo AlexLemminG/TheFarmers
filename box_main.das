@@ -43,6 +43,57 @@ var aiCharacters : array<AiCharacter?>
 var map_size_f = float2(float(map_size.x),float(map_size.y))
 var seed : int4
 
+var sounds : table<string; SoundHandle>
+var empty_sound : SoundHandle
+
+def play_sound(str : string; pos : float2; volumeMult : float = 1.0; pitchMult : float = 1.0)
+    var snd = sounds[str]
+    if snd.duration == 0.0
+        try
+            snd <- create_managed_sound("sounds/{str}.wav")
+        recover
+            pass
+
+    let dist_multi = 0.5
+    let delta_pos = pos - player.position
+    var volume = volumeMult / max(1.0, length_sq(delta_pos * dist_multi))
+    var pitch = pitchMult
+    var pan = clamp(-delta_pos.x * 0.5, -0.5, 0.5)
+    snd |> play_sound(volume, pitch, pan)
+
+def random_float(min : float; max : float) : float
+    return random_float(seed) * (max-min) + min
+
+def play_sound(kind : SoundKind; pos : int2)
+    play_sound(kind, float2(pos))
+
+def play_sound(kind : SoundKind; pos : float2)
+    var str = "{kind}"
+    var volume = 1.0
+    var pitch = 1.0
+    if kind == SoundKind FOOTSTEP
+        str = "FOOTSTEP ({(random_int(seed) % 8) + 1})"
+        volume = 0.2
+    elif kind == SoundKind CHOP
+        pitch = random_float(0.9, 1.1)
+    elif kind == SoundKind FIRE_PUT_OUT
+        volume = 0.3
+    elif kind == SoundKind PICK || kind == SoundKind DROP
+        volume = 0.3
+        pitch = random_float(1.5, 1.6)
+    elif kind == SoundKind GENERIC_ACTION
+        volume = 0.3
+        pitch = random_float(0.7, 0.75)
+
+    play_sound(str, pos, volume, pitch)
+
+def get_pick_sound(kind : TileKind) : SoundKind
+    return SoundKind PICK
+
+def get_drop_sound(kind : TileKind) : SoundKind
+    return SoundKind DROP
+
+
 var time_scale = 1.0
 
 let dbg_pathfinding = false
@@ -268,6 +319,7 @@ class Character
     color : uint = 0xFFFFFFFF
     anim : Anim
     carry_item : TileKind = TileKind NONE
+    next_footstep_time : float
 
 
 def GetPreferedSpeed(character : Character?) : float
@@ -308,6 +360,9 @@ def initialize
     pieces <- create_managed_image("piece.png") 
     pieces |> set_image_smooth(true)
     pieces |> set_image_use_mipmap()
+    
+    var empty_sound_raw : array<float>
+    empty_sound = create_managed_sound(44100, empty_sound_raw)
 
     tiles <- create_managed_image("tiles.png") 
     camera.scale = 3.0
@@ -512,8 +567,11 @@ def cut_tree(var tree : Tile)
     if tree.anim.kind != AnimKind NONE
         return
 
+    play_sound(SoundKind CHOP, tree.position)
+    
     var isFinalHit = tree.info >= 3
     if isFinalHit
+        play_sound(SoundKind TREE_FALL, tree.position)
         tree.anim.kind = AnimKind TREE_FALL
         tree.anim.t = 0.0
         tree.anim.stopT = 1.0
@@ -532,6 +590,8 @@ def drop(kind : TileKind; pos : int2)
     tile.anim.kind = AnimKind NONE
     tile.kind = kind
     grid_items->setTile(tile)
+
+    play_sound(get_drop_sound(kind), pos)
 
 def item_count_per_tile(kind : TileKind) : int
     if kind == TileKind WHEAT_FULL
@@ -574,6 +634,8 @@ def pick(var tile : Tile)
     if tile.anim.kind != AnimKind NONE
         return
     var kind = tile.kind
+
+    play_sound(get_pick_sound(tile.kind), tile.position)
 
 
     if tile.kind == TileKind WHEAT_FULL
@@ -669,25 +731,32 @@ def get_nearest_npc(pos : float2) : AiCharacter?
 def _craft(var character : Character?; itemTile : Tile; exec : bool) : bool
     var kind = itemTile.kind 
     var result = false
+
+    var character_pos = character.position
     var groundTile = grid_ground->getTileInt(itemTile.position)
     var groundKind = groundTile.kind 
 
     if kind == TileKind WOOD && character.carry_item == TileKind FLINT_STONE
         if exec
+            play_sound(SoundKind GENERIC_ACTION, character_pos)
             kind = TileKind CAMPFIRE
             //character.carry_item = TileKind NONE
         result = true
     elif kind == TileKind CAMPFIRE && character.carry_item == TileKind BUCKET_WITH_WATER
         if exec
+            play_sound(SoundKind DROP_WATER, character_pos)
+            play_sound(SoundKind FIRE_PUT_OUT, character_pos)
             kind = TileKind COAL
             character.carry_item = TileKind BUCKET_EMPTY
         result = true
     elif groundKind == TileKind WATER && character.carry_item == TileKind BUCKET_EMPTY
         if exec
+            play_sound(SoundKind PICK_WATER, character_pos)
             character.carry_item = TileKind BUCKET_WITH_WATER
         result = true
     elif kind == TileKind NONE && groundKind == TileKind WATER && character.carry_item == TileKind WOOD
         if exec
+            play_sound(SoundKind GENERIC_ACTION, character_pos)
             character.carry_item = TileKind NONE
             groundKind = TileKind WOODEN_PLANE
             kind = TileKind NONE
@@ -700,34 +769,41 @@ def _craft(var character : Character?; itemTile : Tile; exec : bool) : bool
         else
             result = true
             if exec
+                play_sound(get_pick_sound(kind), character_pos)
                 character.carry_item = sum
                 kind = reminder
     elif is_collected_wheat(character.carry_item) && is_ground_prepared1(itemTile.position) && is_ground_prepared2(itemTile.position) && itemTile.kind == TileKind NONE
         if exec
+            play_sound(SoundKind GENERIC_ACTION, character_pos)
             character.carry_item = get_wheat_from_count(get_wheat_count(character.carry_item) - 1)
             kind = TileKind PLANTED_SEEDS
         result = true
     elif kind == TileKind WHEAT_FULL && character.carry_item == TileKind NONE
         if exec
+            play_sound(SoundKind GENERIC_ACTION, character_pos)
             kind = TileKind WHEAT_COLLECTED_2
             unprepare_ground_for_seeds2(itemTile.position)
         result = true
     elif kind == TileKind WOOD && character.carry_item == TileKind WOOD
         if exec
+            play_sound(SoundKind GENERIC_ACTION, character_pos)
             kind = TileKind FENCE
             character.carry_item = TileKind NONE
         result = true
     elif kind == TileKind BUSH_WITH_BERRIES && character.carry_item == TileKind NONE
         if exec
+            play_sound(SoundKind EAT_APPLE, character_pos)
             kind = TileKind BUSH
             character.hunger = max(0.0, character.hunger - 1.0)
         result = true
     elif kind == TileKind BUSH && character.carry_item == TileKind NONE
         if exec
+            play_sound(SoundKind GENERIC_ACTION, character_pos)
             kind = TileKind NONE
         result = true
     elif kind == TileKind FENCE && character.carry_item == TileKind NONE
         if exec
+            play_sound(get_pick_sound(TileKind FENCE), character_pos)
             kind = TileKind NONE
             character.carry_item = TileKind FENCE
         result = true
@@ -920,15 +996,18 @@ def _do_action(exec : bool) : bool
         if is_ground_prepared1(item.position) && is_ground_prepared2(item.position)
             if is_collected_wheat(player.carry_item)
                 if exec
+                    play_sound(SoundKind GENERIC_ACTION, item.position)
                     plant_seeds(item.position)
                 return true
         else
             if is_ground_prepared1(item.position)
                 if exec
+                    play_sound(SoundKind GENERIC_ACTION, item.position)
                     prepare_ground_for_seeds2(item.position)
                 return true
             elif can_prepare_ground_for_seeds1(item.position)
                 if exec
+                    play_sound(SoundKind GENERIC_ACTION, item.position)
                     prepare_ground_for_seeds1(item.position)
                 return true
     elif int(item.kind) >= int(TileKind TREE_GREEN) && int(item.kind) <= int(TileKind TREE_RED)
@@ -946,6 +1025,7 @@ def handle_anim_finished(var ch : Character?)
 def handle_anim_finished(var tile : Tile&)
     if tile.anim.kind == AnimKind TREE_FALL
         tile.kind = TileKind WOOD
+        play_sound(SoundKind TREE_FALL_END, tile.position)
     elif tile.anim.kind == AnimKind PICK
         tile.kind = TileKind NONE
     tile.anim.kind = AnimKind NONE
@@ -962,6 +1042,10 @@ def get_nearest_walkable(pos : float2) : int2
                     bestPos = posInt + int2(dx,dy)
                     minDist = dist
     return bestPos
+
+def random_wander_pos(char_pos : float2) : float2
+    let diameter = 10.0
+    return float2(clamp((random_float(seed) - 0.5) * diameter + char_pos.x, 0.0, float(map_size.x-1)), clamp((random_float(seed) - 0.5) * diameter + char_pos.y, 0.0, float(map_size.y-1)))
 
 [export]
 def act(_dt: float)
@@ -1006,6 +1090,11 @@ def act(_dt: float)
             die(ch)
             continue
 
+        if ch.next_footstep_time < 0.0
+            play_sound(SoundKind FOOTSTEP, ch.position)
+            ch.next_footstep_time = 1.0
+        ch.next_footstep_time -= dt * ch.speed * 1.0
+
         var hunger_speed = hunger_per_hour * hours_per_second
         if ch.isRunning && !is_on_horse(ch)
             hunger_speed *= 2.0
@@ -1037,10 +1126,10 @@ def act(_dt: float)
 
     for ch in aiCharacters
         if length(ch.target_position - ch.position) < 1.0
-            ch.target_position = float2(random_float(seed) * float(map_size.x-1), random_float(seed) * float(map_size.y-1))
+            ch.target_position = random_wander_pos(ch.position)
             continue
         while !is_walkable_for_a_star(grid_ground->getIntPos(ch.target_position))
-            ch.target_position = float2(random_float(seed) * float(map_size.x), random_float(seed) * float(map_size.y))
+            ch.target_position = random_wander_pos(ch.position)
         var preferedSpeed = GetPreferedSpeed(ch)
         if ch.on_leash
             var leash_length = 1.0
@@ -1063,7 +1152,9 @@ def act(_dt: float)
                 immediateTargetPos = float2(path[1]) + (grid_items->getTileInt(path[1]).kind == TileKind NONE ? float2(0.0) : float2(0.25, 0.25))
             elif !ch.on_leash
                 immediateTargetPos = ch.position
+                ch.target_position = random_wander_pos(ch.position)
         ch.velocity = lerp(ch.velocity, clampLength((immediateTargetPos - ch.position)*2.0, 1.f) * preferedSpeed, 3.0 * dt)
+
 
 
     camera.position = lerp(camera.position, player.position, dt * 3.0) 

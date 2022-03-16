@@ -143,3 +143,16 @@ class Grid
             return self.tiles[idx].z
         else
             return 0.0
+
+enum SoundKind
+    EAT_APPLE
+    CHOP
+    TREE_FALL
+    TREE_FALL_END
+    PICK
+    PICK_WATER
+    DROP_WATER
+    DROP
+    FOOTSTEP
+    GENERIC_ACTION
+    FIRE_PUT_OUT
