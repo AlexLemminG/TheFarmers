@@ -322,7 +322,7 @@ class Character
     next_footstep_time : float
 
 
-def GetPreferedSpeed(character : Character?) : float
+def GetPreferedSpeed(character : Character) : float
     if character.kind == TileKind SHEEP
         return 0.2
     elif character.kind == TileKind HORSE
@@ -330,7 +330,7 @@ def GetPreferedSpeed(character : Character?) : float
     else
         return GetMaxSpeed(character) / 2.0
 
-def GetMaxSpeed(character : Character?) : float
+def GetMaxSpeed(character : Character) : float
     if character.kind == TileKind HORSE || character.kind == TileKind HUMAN_ON_HORSE
         return 4.0
     elif character.kind == TileKind SHEEP
@@ -343,6 +343,79 @@ class Player : Character
 
 class AiCharacter : Character
     target_position : float2
+    def Think(dt : float)
+        if length(target_position - position) < 1.0
+            target_position = random_wander_pos(position)
+            return
+        while !is_walkable_for_a_star(grid_ground->getIntPos(target_position))
+            target_position = random_wander_pos(position)
+        var preferedSpeed = GetPreferedSpeed(self)
+        if on_leash
+            var leash_length = 1.0
+            var delta = player.position - position
+            if follow_player_on_leash && length(delta) > 1.0
+                target_position = position + clampLength(delta, length(delta) - leash_length)
+            else
+                target_position = position
+            preferedSpeed = min(length(delta), GetMaxSpeed(self))
+
+        var immediateTargetPos : float2
+        immediateTargetPos = target_position
+        if !is_walkable_for_a_star(grid_ground->getIntPos(position)) && !on_leash
+            immediateTargetPos = float2(get_nearest_walkable(position))
+        elif length(target_position - position) > 1.0
+            var path : array<int2>
+            path <- a_star(grid_ground->getIntPos(position), grid_ground->getIntPos(target_position))
+            if length(path) > 1
+                //TODO relax path to remove zig-zags
+                immediateTargetPos = float2(path[1]) + (grid_items->getTileInt(path[1]).kind == TileKind NONE ? float2(0.0) : float2(0.25, 0.25))
+            elif !on_leash
+                immediateTargetPos = position
+                target_position = random_wander_pos(position)
+        velocity = lerp(velocity, clampLength((immediateTargetPos - position)*2.0, 1.f) * preferedSpeed, 3.0 * dt)
+
+def find_nearest_item(kind : TileKind; pos : int2) : int2
+    let radius = 10
+    //PERF
+    var nearest = invalid_tile_pos
+    var nearest_dist = float(radius * radius)
+    for dx in range(-radius, radius+1)
+        for dy in range(-radius, radius+1)
+            if grid_items->getTileInt(pos + int2(dx,dy)).kind == kind && length(float2(int2(dx,dy))) < nearest_dist 
+                nearest_dist = length(float2(dx,dy))
+                nearest = pos + int2(dx,dy)
+
+    return nearest
+
+class AiCharacterFireStarter : AiCharacter
+    def override Think(dt : float)
+        AiCharacter`Think(self, dt)
+
+        let intPos = grid_items->getIntPos(position)
+        if carry_item != TileKind FLINT_STONE
+            let nearest = find_nearest_item(TileKind FLINT_STONE, intPos)
+            if nearest == invalid_tile_pos
+                return
+            if length(float2(nearest - intPos)) > 0.8
+                target_position = float2(nearest)
+                return
+            pick(self, grid_items->getTileInt(nearest))
+            return
+        
+        var nearest_wood_pos = find_nearest_item(TileKind WOOD, intPos)
+        if nearest_wood_pos == invalid_tile_pos
+            return
+        
+        if length(float2(nearest_wood_pos - intPos)) > 0.8
+            target_position = float2(nearest_wood_pos)
+            return
+
+        var tile = grid_items->getTileInt(nearest_wood_pos)
+        if !can_craft(self, tile)
+            return
+        craft(self, tile)
+            
+        pass
 
 def die(var character : Character?)
     if character.anim.kind == AnimKind DEATH
@@ -414,20 +487,27 @@ def initialize
     push(characters, player)
 
     for i in range(0, npcCount)
-        var npc = new AiCharacter()
+        var npc : AiCharacter?
+        if i == 0
+            npc = new AiCharacterFireStarter()
+        else
+            npc = new AiCharacter()
         npc.position = float2(random_float(seed) * float(map_size.x), random_float(seed) * float(map_size.y))
         npc.target_position = npc.position
         var r = random_float(seed)
-        if r > 0.7
-            npc.kind = TileKind HORSE
-        elif r > 0.4
-            npc.kind = TileKind SHEEP
-        elif r > 0.3
-            npc.kind = TileKind CHILD_A
-        elif r > 0.2
-            npc.kind = TileKind CHILD_B
-        else
+        if i == 0
             npc.kind = TileKind HUMAN
+        else
+            if r > 0.7
+                npc.kind = TileKind HORSE
+            elif r > 0.4
+                npc.kind = TileKind SHEEP
+            elif r > 0.3
+                npc.kind = TileKind CHILD_A
+            elif r > 0.2
+                npc.kind = TileKind CHILD_B
+            else
+                npc.kind = TileKind HUMAN
 
         push(characters, npc)
         push(aiCharacters, npc)
@@ -554,11 +634,11 @@ def open_chest(var chest : Tile)
     if random_float(seed) > 0.5
         player.health = min(player.health + 0.1, 1.0)
         chest.kind = TileKind HEART_FULL
-        pick(chest)
+        pick(*player, chest)
     else
         player.hunger = max(player.hunger - 0.5, 0.0)
         chest.kind = TileKind HUNGER_FULL
-        pick(chest)
+        pick(*player, chest)
 
     grid_items->setTile(chest)
     player.items[TileKind GOLD] += 1
@@ -630,7 +710,7 @@ def add_wheat_reminder(a : TileKind; b : TileKind) : TileKind
 def is_collected_wheat(kind : TileKind) : bool
     return int(kind) >= int(TileKind WHEAT_COLLECTED_1) && int(kind) <= int(TileKind WHEAT_COLLECTED_6)
 
-def pick(var tile : Tile)
+def pick(var character : Character; var tile : Tile)
     if tile.anim.kind != AnimKind NONE
         return
     var kind = tile.kind
@@ -642,19 +722,19 @@ def pick(var tile : Tile)
         unprepare_ground_for_seeds2(tile.position)
     
     if is_big_item(tile.kind)
-        if player.carry_item != TileKind NONE
-            if is_collected_wheat(kind) && is_collected_wheat(player.carry_item)
-                player.carry_item = add_wheat(kind, player.carry_item)
-                tile.kind = add_wheat_reminder(kind, player.carry_item)
+        if character.carry_item != TileKind NONE
+            if is_collected_wheat(kind) && is_collected_wheat(character.carry_item)
+                character.carry_item = add_wheat(kind, character.carry_item)
+                tile.kind = add_wheat_reminder(kind, character.carry_item)
             else
-                drop(player.carry_item, tile.position)
-                player.carry_item = kind
+                drop(character.carry_item, tile.position)
+                character.carry_item = kind
                 tile.kind = TileKind NONE
         else
-            player.carry_item = kind
+            character.carry_item = kind
             tile.kind = TileKind NONE
     else
-        player.items[tile.kind] += item_count_per_tile(tile.kind)
+        character.items[tile.kind] += item_count_per_tile(tile.kind)
         tile.anim.kind = AnimKind PICK
         tile.anim.t = 0.0
         tile.anim.stopT = 0.5
@@ -728,7 +808,7 @@ def get_nearest_npc(pos : float2) : AiCharacter?
 
     return nearestNpc
 
-def _craft(var character : Character?; itemTile : Tile; exec : bool) : bool
+def _craft(var character : Character; itemTile : Tile; exec : bool) : bool
     var kind = itemTile.kind 
     var result = false
 
@@ -818,10 +898,10 @@ def _craft(var character : Character?; itemTile : Tile; exec : bool) : bool
     
     return result
 
-def can_craft(var character : Character?; itemTile : Tile) : bool
+def can_craft(var character : Character; itemTile : Tile) : bool
     return _craft(character, itemTile, false)
 
-def craft(var character : Character?; itemTile : Tile)
+def craft(var character : Character; itemTile : Tile)
     _craft(character, itemTile, true)
 
 def do_alt_action()
@@ -831,16 +911,16 @@ def can_do_alt_action() : bool
     let result = _alt_action(false)
     return result.is_valid
 
-let invalidTilePos = int2(-9999,-9999)
+let invalid_tile_pos = int2(-9999,-9999)
 
 def clear_alt_action_highlight()
     if highlightedAltActionNpc != null
         set_highlighted(highlightedAltActionNpc, false)
         highlightedAltActionNpc = null
 
-    if highlightedAltActionTilePos != invalidTilePos
+    if highlightedAltActionTilePos != invalid_tile_pos
         set_highlighted(highlightedAltActionTilePos, false)
-        highlightedAltActionTilePos = invalidTilePos
+        highlightedAltActionTilePos = invalid_tile_pos
 
 def draw_alt_action_highlight()
     let result = _alt_action(false)
@@ -859,9 +939,9 @@ def highlight_alt_action()
         set_highlighted(highlightedAltActionNpc, false)
         highlightedAltActionNpc = null
 
-    if highlightedAltActionTilePos != invalidTilePos
+    if highlightedAltActionTilePos != invalid_tile_pos
         set_highlighted(highlightedAltActionTilePos, false)
-        highlightedAltActionTilePos = invalidTilePos
+        highlightedAltActionTilePos = invalid_tile_pos
 
     var result = _alt_action(false)
     highlightedAltActionNpc = result.target_char
@@ -933,12 +1013,12 @@ def _alt_action(exec : bool) : AltActionResult
             return result
 
     var item = grid_items->getTile(player.position)
-    if can_craft(player, item)
+    if can_craft(*player, item)
         result.is_valid = true
         result.target_item_pos = item.position
         result.has_target_item_pos = true
         if exec
-            craft(player, item)
+            craft(*player, item)
         return result
     
     return result
@@ -979,7 +1059,7 @@ def _do_action(exec : bool) : bool
 
     if is_pickable(item.kind)
         if exec
-            pick(item)
+            pick(*player, item)
         return true
     elif player.carry_item != TileKind NONE
         var on_empty_tile = item.kind == TileKind NONE
@@ -1077,7 +1157,7 @@ def act(_dt: float)
     if get_key_down(VK_F7)
         load()
 
-    player.velocity = clampLength(player.velocity, 1.0) * GetMaxSpeed(player)
+    player.velocity = clampLength(player.velocity, 1.0) * GetMaxSpeed(*player)
     if get_key(VK_LSHIFT)
         //todo less running on horse + some penalty
         player.velocity *= 2.5
@@ -1125,37 +1205,7 @@ def act(_dt: float)
                 processCollision(ch.position, tileToCollide2)
 
     for ch in aiCharacters
-        if length(ch.target_position - ch.position) < 1.0
-            ch.target_position = random_wander_pos(ch.position)
-            continue
-        while !is_walkable_for_a_star(grid_ground->getIntPos(ch.target_position))
-            ch.target_position = random_wander_pos(ch.position)
-        var preferedSpeed = GetPreferedSpeed(ch)
-        if ch.on_leash
-            var leash_length = 1.0
-            var delta = player.position - ch.position
-            if ch.follow_player_on_leash && length(delta) > 1.0
-                ch.target_position = ch.position + clampLength(delta, length(delta) - leash_length)
-            else
-                ch.target_position = ch.position
-            preferedSpeed = min(length(delta), GetMaxSpeed(ch))
-
-        var immediateTargetPos : float2
-        immediateTargetPos = ch.target_position
-        if !is_walkable_for_a_star(grid_ground->getIntPos(ch.position)) && !ch.on_leash
-            immediateTargetPos = float2(get_nearest_walkable(ch.position))
-        elif length(ch.target_position - ch.position) > 1.0
-            var path : array<int2>
-            path <- a_star(grid_ground->getIntPos(ch.position), grid_ground->getIntPos(ch.target_position))
-            if length(path) > 1
-                //TODO relax path to remove zig-zags
-                immediateTargetPos = float2(path[1]) + (grid_items->getTileInt(path[1]).kind == TileKind NONE ? float2(0.0) : float2(0.25, 0.25))
-            elif !ch.on_leash
-                immediateTargetPos = ch.position
-                ch.target_position = random_wander_pos(ch.position)
-        ch.velocity = lerp(ch.velocity, clampLength((immediateTargetPos - ch.position)*2.0, 1.f) * preferedSpeed, 3.0 * dt)
-
-
+        ch->Think(dt)
 
     camera.position = lerp(camera.position, player.position, dt * 3.0) 
     camera->updateOffsetAndScale()
@@ -1402,7 +1452,6 @@ def processCollisionRect(var deltaPos : float2&; halfSizeX : float; halfSizeY : 
 
 def processCollision(var charPos : float2&; tile : Tile)
     var deltaPos = charPos - float2(tile.position)
-    log("{tile.position}")
     if tile.kind == TileKind TREE_GREEN || tile.kind == TileKind TREE_YELLOW || tile.kind == TileKind TREE_RED
         processCollisionCircle(deltaPos, 0.3)
     elif tile.kind == TileKind CHEST_IRON || tile.kind == TileKind WOOD || tile.kind == TileKind CAMPFIRE
