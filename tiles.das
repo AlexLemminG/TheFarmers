@@ -16,6 +16,7 @@ enum TileKind
     CHILD_B
     WOOD
     TREE_GREEN
+    TREE
     TREE_YELLOW
     TREE_RED
     CHEST_IRON
@@ -42,6 +43,9 @@ enum TileKind
     WHEAT_COLLECTED_4
     WHEAT_COLLECTED_5
     WHEAT_COLLECTED_6
+    WHEAT_HAY //special
+    WHEAT_COLLECTED_NOT_6 //special
+    WHEAT //special
     GOLD
     HORSE
     SHEEP
@@ -60,6 +64,9 @@ enum TileKind
     COAL
     BUSH
     BUSH_WITH_BERRIES
+    FLAG_RED
+    FLAG_GREEN
+    FLAG_BLUE
 
 enum AnimKind
     NONE
@@ -101,10 +108,9 @@ class Grid
     tiles : array<Tile>
 
     def getIdxInt(pos : int2) : int
-        var idx = pos.x * height + pos.y
-        if idx >= length(self.tiles) || idx < 0
+        if pos.x >= width || pos.y >= height || pos.x < 0 || pos.y < 0
             return -1
-        return idx
+        return pos.x * height + pos.y
 
     def getIdx(pos : float2) : int
         return getIdxInt(int2(roundi(pos.x), roundi(pos.y)))
