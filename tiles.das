@@ -43,8 +43,9 @@ enum TileKind
     WHEAT_COLLECTED_4
     WHEAT_COLLECTED_5
     WHEAT_COLLECTED_6
-    WHEAT_HAY //special
+    WHEAT_STACK //special
     WHEAT_COLLECTED_NOT_6 //special
+    WHEAT_COLLECTED_ANY //special
     WHEAT //special
     GOLD
     HORSE
@@ -64,9 +65,9 @@ enum TileKind
     COAL
     BUSH
     BUSH_WITH_BERRIES
-    FLAG_RED
-    FLAG_GREEN
-    FLAG_BLUE
+    RED_FLAG
+    GREEN_FLAG
+    BLUE_FLAG
 
 enum AnimKind
     NONE
