@@ -68,19 +68,21 @@ enum TileKind
     RED_FLAG
     GREEN_FLAG
     BLUE_FLAG
-
 enum AnimKind
     NONE
     SQUASH_AND_STRETCH
     TREE_FALL
     PICK
     DEATH
+    SLEEP
+    GROWING_BERRIES
 
 struct Anim
     kind : AnimKind
     t : float
     stopT : float
 
+//TODO save tile animation for berries bush at least
 struct TileBase
     z : float
     color : uint = 0xffffffff
