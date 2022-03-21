@@ -50,6 +50,8 @@ enum TileKind
     GOLD
     HORSE
     SHEEP
+    SHEEP_SHEARED
+    WOOL
     HUMAN_ON_HORSE
     UI_NIGHT
     UI_DAY
@@ -58,6 +60,7 @@ enum TileKind
     CAMPFIRE
     CAMPFIRE_2
     CAMPFIRE_3
+    STONE
     FLINT_STONE
     BUCKET_EMPTY
     BUCKET_WITH_WATER
@@ -68,6 +71,20 @@ enum TileKind
     RED_FLAG
     GREEN_FLAG
     BLUE_FLAG
+    BED
+    BED_OCCUPIED//special
+    SHEEP_SHEARS
+    STOVE
+    STOVE_WITH_COAL
+    STOVE_WITH_COAL_FIRED
+    FLOUR
+    BREAD_1
+    BREAD_2
+    BREAD_3
+    BREAD_4
+    BREAD_5
+    BREAD_6
+
 enum AnimKind
     NONE
     SQUASH_AND_STRETCH
@@ -75,6 +92,7 @@ enum AnimKind
     PICK
     DEATH
     SLEEP
+    SLEEP_IN_BED
     GROWING_BERRIES
 
 struct Anim
