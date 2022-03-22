@@ -1,2 +1,5 @@
 .vscode
 save.sav
+*.sav
+*.png~
+*.kra~

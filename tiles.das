@@ -20,6 +20,10 @@ enum TileKind
     TREE_YELLOW
     TREE_RED
     CHEST_IRON
+    TREE_YELLOW_SMALL
+    TREE_RED_SMALL
+    TREE_GREEN_SMALL
+    CHEST_IRON_SMALL
     TILE_SELECTION
     FENCE
     FENCE_H
@@ -60,6 +64,8 @@ enum TileKind
     CAMPFIRE
     CAMPFIRE_2
     CAMPFIRE_3
+    CAMPFIRE_NO_FIRE
+    CAMPFIRE_NO_WOOD
     STONE
     FLINT_STONE
     BUCKET_EMPTY
@@ -78,6 +84,7 @@ enum TileKind
     STOVE_WITH_COAL
     STOVE_WITH_COAL_FIRED
     FLOUR
+    BREAD
     BREAD_1
     BREAD_2
     BREAD_3
@@ -106,7 +113,7 @@ struct TileBase
     color : uint = 0xffffffff
     kind : TileKind
     anim : Anim
-    info : int
+    saved_float : float
     mirrorX : bool
 
 

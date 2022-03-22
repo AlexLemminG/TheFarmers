@@ -9,30 +9,41 @@ options debugger            // uncomment for debug in VS Code
 require daslib/debug        // uncomment for debug in VS Code
 
 var dbg_mode : bool = true
-// tweakable settings
-var night_percent = 0.0
-var rain_percent = 0.0
-var wheat_grow_timer = 0.0
-var wheat_grow_period = 5.0
 var draw_grid = false
-var map_size = int2(20,20)
-var npcCount = 30
-var hunger_per_hour = 600.0
-var health_loss_from_hunger_per_hour = 0.0
-var health_gain_from_no_hunger_per_hour = 600.0
-var gamedays_per_hour = 12.0
-
-var gamedays_to_grow_wool = 2.0
-
 var dbg_time_scale = 1.0
+
 var time_scale = 1.0
 var player_sleep_time_scale_when_everyone_sleeps = 50.0
 var player_sleep_time_scale = 10.0
 var seconds_per_hour = 3600.0
 var hours_per_second = 1.0 / seconds_per_hour
+// tweakable settings
+
+var night_percent = 0.0
+var rain_percent = 0.0
+
+//--------------------------------params_begin--------------------------------
+var wheat_grow_period = 15.0 / 3.0
+var grass_grow_periods_add = 73 //prime only please
+var grass_grow_periods_count = 11 //prime only please
+var tree_grow_periods_add = 73 //prime only please
+var tree_grow_periods_count = 11 //prime only please
+var map_size = int2(20,20)
+var npcCount = 30
+var gamedays_per_hour = 12.0
+var hunger_per_hour = gamedays_per_hour
+var health_loss_from_hunger_per_hour = gamedays_per_hour / 3.0 
+var health_gain_from_no_hunger_per_hour = gamedays_per_hour / 3.0 
+var gamedays_to_grow_wool = 2.0
+var seconds_per_gameday = seconds_per_hour / gamedays_per_hour
+var grass_grow_one_period = seconds_per_gameday / float(grass_grow_periods_count)
+var tree_grow_one_period = seconds_per_gameday / float(tree_grow_periods_count)
+var initial_day_float = 1.0 + 6.0 / 24.0
+var campfire_duration = seconds_per_gameday * 2.0 / 3.0
+//--------------------------------params_end--------------------------------
+
 var pieces : ImageHandle
 var tiles : ImageHandle
-var seconds_per_gameday = seconds_per_hour / gamedays_per_hour
 
 var grid_ground = new Grid()
 var grid_ground_decals = new Grid()
@@ -58,11 +69,15 @@ var sounds : table<string; SoundHandle>
 var empty_sound : SoundHandle
 
 var all_human_names : array<string>
-var initial_day_float = 1.0 + 6.0 / 24.0
 
 struct WorldState
     next_free_human_name : int = 0
     day_float : float = initial_day_float
+    wheat_grow_timer : float = 0.0
+    grass_grow_timer : float = 0.0
+    grass_grow_idx : int = 0
+    tree_grow_timer : float = 0.0
+    tree_grow_idx : int = 0
 
 def get_realtime_since_world_started() : float
     return (world_state.day_float - initial_day_float) * seconds_per_gameday
@@ -125,6 +140,7 @@ struct SavedGrid
     height : int
     width : int
     tiles : array<TileKind>
+    tiles_saved_float : array<float>
 
 struct SavedCharacter
     position : float2
@@ -220,6 +236,8 @@ def save_grid(g : Grid?) : JsonValue?
             push(grid.tiles, TileKind NONE)
         else
             push(grid.tiles, k.kind)
+    for k in g.tiles
+        push(grid.tiles_saved_float, k.saved_float)
     return JV(grid)
 
 var str_to_tile_kind : table<string; TileKind>
@@ -237,6 +255,11 @@ def load_grid(var json : JsonValue?; is_ground : bool) : Grid?
         var s <- t as _string
         push(grid.tiles, str_to_tile_kind[s])
     
+    var i = 0
+    var tileFloatsJson <- (json as _object)["tiles_saved_float"] as _array
+    for t in tileFloatsJson
+        push(grid.tiles_saved_float, float(t as _number))
+
     var g : Grid?
     if is_ground
         g = generate_default_ground_grid(grid.height, grid.width)
@@ -248,19 +271,35 @@ def load_grid(var json : JsonValue?; is_ground : bool) : Grid?
     
     for idx in range(length(grid.tiles))
         g.tiles[idx].kind = grid.tiles[idx]
+        g.tiles[idx].saved_float = grid.tiles_saved_float[idx]
 
     return g
 
 def load_world_state(var json : JsonValue?) : WorldState
-    var state = WorldState()
-    state.day_float = float((json as _object)["day_float"] as _number)
+    var state = from_JV(json, type<WorldState>)
+    
     return state
 
 def save_world_state(state : WorldState) : JsonValue?
     return JV(state)
 
-def save()
-    var file = fopen("save.sav", "w")
+def has_file(name : string):bool
+    var file = fopen(name, "r")
+    if file == null
+        return false
+    fclose(file)
+    return true
+
+def get_save_slot_file(slot : int) : string
+    return "save_{slot}.sav"
+
+def has_save(slot : int) : bool
+    return has_file(get_save_slot_file(slot))
+
+
+def save(slot : int)
+    assert(0 <= slot && slot <= save_slots_count)
+    var file = fopen(get_save_slot_file(slot), "w")
     if file == null
         return
 
@@ -297,9 +336,9 @@ def log(str : string)
         erase(dbg_msg, 0)
 
 
-def load()
+def load(slot : int)
     //TODO player items if they still exist
-    var file = fopen("save.sav", "r")
+    var file = fopen(get_save_slot_file(slot), "r")
     if file == null
         return
 
@@ -422,6 +461,9 @@ enum AiCommandKind
     PLANT_WHEAT
     STAY_NEAR_A_TILE
     GO_TO_SLEEP
+    EAT_SOMETHING
+    MAKE_BREAD
+    MAKE_FIRE
 
 
 struct AiCommand
@@ -463,6 +505,9 @@ def is_sleep_action_on_bed() : bool
 def angle_radius_to_point(angle_rad : float; radius : float)
     return float2(sin(angle_rad), cos(angle_rad)) * radius
 
+def is_eatable(kind : TileKind) : bool
+    return is_bread(kind) || kind == TileKind BUSH_WITH_BERRIES
+
 class AiCharacter : Character
     target_position : float2
     dbg_str : string
@@ -477,18 +522,25 @@ class AiCharacter : Character
             random_float(s) 
         return random_float(s) 
 
-    def get_current_command() : AiCommand
-        if is_evening_time()
-            if is_human(kind)
-                var cmd : AiCommand
-                cmd.a_tile = TileKind CAMPFIRE
-                cmd.kind = AiCommandKind STAY_NEAR_A_TILE
-                return cmd
-        elif is_night_time(fixed_random_float())
+    def get_current_commands_list() : array<AiCommand>
+        var result : array<AiCommand>
+        if is_night_time(fixed_random_float())
             var cmd : AiCommand
             cmd.kind = AiCommandKind GO_TO_SLEEP
-            return cmd
-        return command
+            push(result, cmd)
+        if hunger > 2.0 / 3.0
+            var cmd : AiCommand
+            cmd.kind = AiCommandKind EAT_SOMETHING
+            push(result, cmd)
+        if is_evening_time() && is_human(kind)
+            var cmd : AiCommand
+            cmd.a_tile = TileKind CAMPFIRE
+            cmd.kind = AiCommandKind STAY_NEAR_A_TILE
+            push(result, cmd)
+        if command.kind != AiCommandKind NONE
+            push(result, command)
+
+        return <- result
 
     def Think(dt : float)
         dbg_str = "" 
@@ -496,12 +548,19 @@ class AiCharacter : Character
         if anim.kind == AnimKind SLEEP || anim.kind == AnimKind SLEEP_IN_BED && !is_night_time(fixed_random_float())
             set_character_animation(self, AnimKind NONE)
 
-        if !process_command(dt, get_current_command())
+        var any_command_exec = false
+        for cmd in get_current_commands_list()
+            if process_command(dt, cmd)
+                any_command_exec = true
+                break
+
+        if !any_command_exec
             if length(target_position - position) < 1.0
                 target_position = random_wander_pos(position)
                 return
             while !is_walkable_for_a_star(grid_ground->getIntPos(target_position), is_human(kind))
                 target_position = random_wander_pos(position)
+
         var preferedSpeed = GetPreferedSpeed(self)
         if on_leash
             var leash_length = 1.0
@@ -561,6 +620,15 @@ class AiCharacter : Character
 
     def dbg_ai(msg : string)
         dbg_str += "{msg}\n"
+
+
+    def ai_util_drop_current_item_if_any() : bool
+        if carry_item != TileKind NONE
+            var nearest_empty_pos = find_nearest_empty_pos(grid_items->getIntPos(position))
+            if nearest_empty_pos == invalid_tile_pos
+                return false
+            drop_carry_item(self, nearest_empty_pos)
+        return true
 
     //true if in process of doing command
     //false if cant do it
@@ -627,11 +695,8 @@ class AiCharacter : Character
                 pick(self, grid_items->getTileInt(nearest_tile_a_pos))
                 return true
         elif cmd.kind == AiCommandKind DO_DEFAULT_ACTION_ON_A_TILE
-            if carry_item != TileKind NONE
-                var nearest_empty_pos = find_nearest_empty_pos(grid_items->getIntPos(position))
-                if nearest_empty_pos == invalid_tile_pos
-                    return false
-                drop_carry_item(self, nearest_empty_pos)
+            if !ai_util_drop_current_item_if_any()
+                return false
 
             let nearest_tile_a_pos = find_nearest_item(cmd.a_tile, intPos)
             if nearest_tile_a_pos == invalid_tile_pos
@@ -641,9 +706,9 @@ class AiCharacter : Character
                 target_position = float2(nearest_tile_a_pos)
                 dbg_ai("setting target_position to nearest {cmd.a_tile} at {nearest_tile_a_pos}")
                 return true
-            idle_time_left = 0.5
             var res = do_alt_action(self, nearest_tile_a_pos)
             if res.is_valid
+                idle_time_left = 0.5
                 dbg_ai("doing alt_action with {cmd.a_tile} at {nearest_tile_a_pos}")
             else
                 dbg_ai("failed to do alt_action with {cmd.a_tile} at {nearest_tile_a_pos}")
@@ -711,8 +776,58 @@ class AiCharacter : Character
             target_position = position
             velocity = float2(0.0,0.0)
             return true //continue sleeping
+        elif cmd.kind == AiCommandKind EAT_SOMETHING
+            var eat_grass = !is_human(kind)
+            var nearest_eat_pos = invalid_tile_pos
+            if eat_grass
+                nearest_eat_pos = find_nearest_t(intPos, $(pos)=>grid_items->getTileInt(pos).kind == TileKind NONE && grid_ground_decals->getTileInt(pos).kind == TileKind NONE && grid_ground->getTileInt(pos).kind == TileKind GRASS)
+            else
+                nearest_eat_pos = find_nearest_t(intPos, $(pos)=>is_eatable(grid_items->getTileInt(pos).kind))
 
+            if nearest_eat_pos == invalid_tile_pos
+                dbg_ai("found nothing to eat")
+                return false
 
+            var nearest_eat_pos_float = float2(nearest_eat_pos)
+            if length(nearest_eat_pos_float - position) > 0.3
+                target_position = nearest_eat_pos_float
+                dbg_ai("setting target_position to nearest food at {nearest_eat_pos}")
+                return true
+
+            if !eat_grass
+                if !ai_util_drop_current_item_if_any()
+                    return false
+                var hint : AltActionCallHint
+                hint.is_eat = true
+                var res = do_alt_action(self, nearest_eat_pos, hint)
+                if res.is_valid
+                    idle_time_left = 0.5
+                    dbg_ai("doing alt_action with {grid_items->getTileInt(nearest_eat_pos).kind} at {nearest_eat_pos}")
+                else
+                    dbg_ai("failed to do alt_action with {grid_items->getTileInt(nearest_eat_pos).kind} at {nearest_eat_pos}")
+                    assert(false)
+                    return false
+                return true     
+            else
+                //eat_grass_action
+                play_sound(SoundKind GENERIC_ACTION, position)//TODO different
+                var tile = grid_ground_decals->getTileInt(nearest_eat_pos)
+                tile.kind = TileKind DECAL_SMALL
+                grid_ground_decals->setTile(tile)
+                hunger = max(0.0, hunger - 1.0 / 3.0)
+                return true
+        elif cmd.kind == AiCommandKind MAKE_BREAD
+            if !is_bread(carry_item)
+                return _process_command(ai_command_bring_a_to_b(TileKind FLOUR, TileKind STOVE_WITH_COAL_FIRED))
+            else
+                ai_util_drop_current_item_if_any()
+            return true
+        elif cmd.kind == AiCommandKind MAKE_FIRE
+            if !_process_command(ai_command_bring_a_to_b(TileKind FLINT_STONE, TileKind STOVE_WITH_COAL))
+                if !_process_command(ai_command_bring_a_to_b(TileKind WOOD, TileKind STOVE))
+                    if !_process_command(ai_command_bring_a_to_b(TileKind FLINT_STONE, TileKind CAMPFIRE_NO_FIRE))
+                        return _process_command(ai_command_bring_a_to_b(TileKind WOOD, TileKind CAMPFIRE_NO_WOOD))
+            
         return false
 
 def item_is(item : TileKind; other : TileKind) : bool
@@ -845,7 +960,7 @@ def ai_command_bring_a_to_b(a : TileKind; b : TileKind) : AiCommand
 [export]
 def initialize
     set_window_title("wasisdasbox")
-    set_resolution(1080,720)
+    set_resolution(960, 640)//TODO
     pieces <- create_managed_image("piece.png") 
     pieces |> set_image_smooth(true)
     pieces |> set_image_use_mipmap()
@@ -902,11 +1017,11 @@ def initialize
                 if random_float(seed) > 0.8
                     var r = random_float(seed)
                     if r > 0.5
-                        item_tile.kind = TileKind TREE_GREEN
+                        item_tile.kind = random_float(seed) > 0.5 ? TileKind TREE_GREEN : TileKind TREE_GREEN_SMALL
                     elif r > 0.125/2.0
-                        item_tile.kind = TileKind TREE_YELLOW
+                        item_tile.kind = random_float(seed) > 0.5 ? TileKind TREE_YELLOW : TileKind TREE_YELLOW_SMALL
                     else
-                        item_tile.kind = TileKind TREE_RED
+                        item_tile.kind = random_float(seed) > 0.5 ? TileKind TREE_RED : TileKind TREE_RED_SMALL
                 elif random_float(seed) > 0.99
                     item_tile.kind = TileKind BUSH_WITH_BERRIES
             else
@@ -1107,7 +1222,7 @@ def cut_tree(var tree : Tile)
 
     play_sound(SoundKind CHOP, tree.position)
     
-    var isFinalHit = tree.info >= 3
+    var isFinalHit = tree.saved_float >= 3.0
     if isFinalHit
         play_sound(SoundKind TREE_FALL, tree.position)
         tree.anim.kind = AnimKind TREE_FALL
@@ -1115,7 +1230,7 @@ def cut_tree(var tree : Tile)
         tree.anim.stopT = 1.0
         grid_items->setTile(tree)
     else
-        tree.info += 1
+        tree.saved_float += 1.0
         tree.anim.kind = AnimKind SQUASH_AND_STRETCH
         tree.anim.t = 0.0
         tree.anim.stopT = 0.2
@@ -1216,7 +1331,7 @@ def is_big_item(kind : TileKind) : bool
         return true
     if kind == TileKind BED || kind == TileKind SHEEP_SHEARS || kind == TileKind WOOL || kind == TileKind STOVE || kind == TileKind STOVE_WITH_COAL || kind == TileKind STONE || kind == TileKind FLOUR
         return true
-    if is_bread(kind)
+    if is_bread(kind) || kind == TileKind CAMPFIRE_NO_FIRE || kind == TileKind CAMPFIRE_NO_WOOD
         return true
     return false
 
@@ -1225,7 +1340,7 @@ def is_pickable(kind : TileKind) : bool
         return true
     if kind == TileKind BED || kind == TileKind SHEEP_SHEARS || kind == TileKind WOOL || kind == TileKind STOVE || kind == TileKind STOVE_WITH_COAL || kind == TileKind STONE || kind == TileKind FLOUR
         return true
-    if is_bread(kind)
+    if is_bread(kind) || kind == TileKind CAMPFIRE_NO_FIRE || kind == TileKind CAMPFIRE_NO_WOOD
         return true
     return false
 var prev_horse : AiCharacter?
@@ -1298,13 +1413,19 @@ def _craft(var character : Character; _itemTile : Tile; exec : bool) : bool
 
     var character_pos = character.position
     var groundTile = grid_ground->getTileInt(itemTile.position)
-    var groundKind = groundTile.kind 
+    var groundKind = groundTile.kind
 
-    if kind == TileKind WOOD && character.carry_item == TileKind FLINT_STONE
+    if (kind == TileKind STONE || kind == TileKind CAMPFIRE_NO_WOOD) && character.carry_item == TileKind WOOD
+        if exec
+            play_sound(SoundKind GENERIC_ACTION, character_pos)
+            kind = TileKind CAMPFIRE_NO_FIRE
+            character.carry_item = TileKind NONE
+        result = true
+    elif kind == TileKind CAMPFIRE_NO_FIRE && character.carry_item == TileKind FLINT_STONE
         if exec
             play_sound(SoundKind GENERIC_ACTION, character_pos)
             kind = TileKind CAMPFIRE
-            //character.carry_item = TileKind NONE
+            itemTile.saved_float = 0.0
         result = true
     elif kind == TileKind WOOD && character.carry_item == TileKind WOOL
         if exec
@@ -1328,11 +1449,15 @@ def _craft(var character : Character; _itemTile : Tile; exec : bool) : bool
         if exec
             play_sound(SoundKind GENERIC_ACTION, character_pos)
             kind = TileKind STOVE_WITH_COAL_FIRED
+            itemTile.saved_float = 0.0
         result = true
     elif kind == TileKind STOVE_WITH_COAL_FIRED && character.carry_item == TileKind FLOUR
         if exec
             play_sound(SoundKind GENERIC_ACTION, character_pos)
             character.carry_item = TileKind BREAD_6
+            itemTile.saved_float += 1.0
+            if itemTile.saved_float >= 3.0
+                kind = TileKind STOVE
         result = true
     elif kind == TileKind WHEAT_COLLECTED_6 && character.carry_item == TileKind STONE
         if exec
@@ -1343,7 +1468,7 @@ def _craft(var character : Character; _itemTile : Tile; exec : bool) : bool
         if exec
             play_sound(SoundKind DROP_WATER, character_pos)
             play_sound(SoundKind FIRE_PUT_OUT, character_pos)
-            kind = TileKind COAL
+            kind = TileKind CAMPFIRE_NO_WOOD
             character.carry_item = TileKind BUCKET_EMPTY
         result = true
     elif kind == TileKind STOVE_WITH_COAL_FIRED && character.carry_item == TileKind BUCKET_WITH_WATER
@@ -1398,12 +1523,12 @@ def _craft(var character : Character; _itemTile : Tile; exec : bool) : bool
         if exec
             play_sound(SoundKind EAT_APPLE, character_pos)
             kind = TileKind BUSH
-            character.hunger = max(0.0, character.hunger - 1.0)
+            character.hunger = max(0.0, character.hunger - 1.0 / 3.0)
             itemTile.anim.kind = AnimKind GROWING_BERRIES
             itemTile.anim.t = 0.0
             itemTile.anim.stopT = seconds_per_gameday
         result = true
-    elif kind == TileKind BUSH && character.carry_item == TileKind NONE
+    elif (kind == TileKind BUSH || kind == TileKind TREE_GREEN_SMALL || kind == TileKind TREE_RED_SMALL || kind == TileKind TREE_YELLOW_SMALL) && character.carry_item == TileKind NONE
         if exec
             play_sound(SoundKind GENERIC_ACTION, character_pos)
             kind = TileKind NONE
@@ -1416,9 +1541,8 @@ def _craft(var character : Character; _itemTile : Tile; exec : bool) : bool
             character.carry_item = TileKind FENCE
         result = true
     if result && exec
-        var tile = itemTile
-        tile.kind = kind
-        grid_items->setTile(tile)
+        itemTile.kind = kind
+        grid_items->setTile(itemTile)
 
         if groundTile.kind != groundKind
             groundTile.kind = groundKind
@@ -1440,8 +1564,16 @@ def can_craft(var character : Character; itemTile : Tile) : bool
 def craft(var character : Character; itemTile : Tile)
     _craft(character, itemTile, true)
 
+struct AltActionCallHint
+    is_eat : bool
+    is_sleep : bool
+
 def do_alt_action(var character : Character; at_pos : int2) : AltActionResult
-    return _alt_action(character, at_pos, true)
+    var hint : AltActionCallHint
+    return _alt_action(character, at_pos, true, hint)
+
+def do_alt_action(var character : Character; at_pos : int2; hint : AltActionCallHint) : AltActionResult
+    return _alt_action(character, at_pos, true, hint)
 
 def can_do_alt_action(var character : Character; at_pos : int2) : bool
     let result = _alt_action(character, at_pos, false)
@@ -1545,6 +1677,10 @@ def get_bread_from_count(count : int) : TileKind
     return TileKind NONE
 
 def _alt_action(var character : Character; _at_pos : int2; exec : bool) : AltActionResult
+    var hint : AltActionCallHint
+    return _alt_action(character, _at_pos, exec, hint)
+
+def _alt_action(var character : Character; _at_pos : int2; exec : bool; hint : AltActionCallHint) : AltActionResult
     var at_pos = _at_pos
     var pos_only = at_pos != invalid_tile_pos
     if at_pos == invalid_tile_pos
@@ -1634,7 +1770,7 @@ def _alt_action(var character : Character; _at_pos : int2; exec : bool) : AltAct
         result.is_valid = true
         return result
 
-    if item.kind == TileKind BED && is_sleep_action_on_bed()
+    if item.kind == TileKind BED && (is_sleep_action_on_bed() || hint.is_sleep)
         if exec
             item.kind = TileKind BED_OCCUPIED
             set_character_animation(character, AnimKind SLEEP_IN_BED)
@@ -1642,7 +1778,7 @@ def _alt_action(var character : Character; _at_pos : int2; exec : bool) : AltAct
             grid_items->setTile(item)
         result.is_valid = true
         return result
-    elif is_bread(item.kind) && character.hunger > 1.0 / 3.0
+    elif is_bread(item.kind) && (character.hunger > 1.0 / 3.0 || hint.is_eat)
         if exec
             item.kind = get_bread_from_count(get_bread_count(item.kind)-1)
             play_sound(SoundKind EAT_APPLE, character.position)//TODO different sound
@@ -1766,8 +1902,168 @@ def random_wander_pos(char_pos : float2) : float2
 def get_int_pos(pos : float2) : int2
     return grid_items->getIntPos(pos)
 
+enum PauseMenuStateKind
+    PAUSE
+    SAVE
+    LOAD
+    QUIT
+
+
+var pause_menu : PauseMenuState?
+
+def ui_draw_pause_menu_text(str : string; x_mid : int; var y : int&)
+    var text_pos = int2(x_mid - int(get_text_size(str).x / 2.0), y)
+    text_out(text_pos.x,text_pos.y, str, 0xffffffff)
+    y += 30
+
+
+def ui_draw_pause_menu()
+    var size = int2(300,300) - int2(0,30 + 30*4)
+    size += int2(0, length(pause_menu.options_str) * 30)
+
+    if length(pause_menu.footer_str) > 0
+        var extra_lines = 4
+        size += int2(0, extra_lines * 30)
+
+    var top = int2(get_screen_width() / 2 - size.x / 2, get_screen_height() / 2 - 200)
+    fill_rect(top.x, top.y, size.x , size.y ,0x80000000)
+
+    var y = get_screen_height() / 2 - 150
+    var x_mid = get_screen_width() / 2
+
+    ui_draw_pause_menu_text(pause_menu.header_str, x_mid, y)
+    y += 30
+
+    for i in range(length(pause_menu.options_str))
+        var str = pause_menu.options_str[i]
+        if pause_menu.idx_selected == i
+            str = "*{str}*" 
+        ui_draw_pause_menu_text(str, x_mid, y)
+
+    if pause_menu.footer_str != ""
+        y += 30
+        ui_draw_pause_menu_text(pause_menu.footer_str, x_mid, y)
+
+
+    pass
+
+def dialog_up_pressed() : bool
+    return get_key_down(VK_UP) || get_key_down(VK_W)
+def dialog_down_pressed() : bool
+    return get_key_down(VK_DOWN) || get_key_down(VK_S)
+def dialog_accept_pressed() : bool
+    return get_key_down(VK_SPACE) || get_key_down(VK_RETURN)
+def dialog_back_pressed() : bool
+    return get_key_down(VK_ESCAPE)
+
+class PauseMenuState
+    idx_selected : int
+    kind : PauseMenuStateKind
+
+    header_str : string
+    options_str : array<string>
+    footer_str : string
+
+
+var save_slots_count = 3
+def update_pause_menu()
+    clear(pause_menu.options_str)
+    pause_menu.header_str = ""
+    pause_menu.footer_str = ""
+    
+    if pause_menu.kind == PauseMenuStateKind PAUSE
+        pause_menu.header_str = "PAUSE"
+        push(pause_menu.options_str, "CONTINUE")
+        push(pause_menu.options_str, "SAVE")
+        push(pause_menu.options_str, "LOAD")
+        push(pause_menu.options_str, "QUIT")
+        pause_menu.footer_str = "[wasd] move\n[space] action\n[f6] quicksave\n[f7] load quicksave"
+    elif pause_menu.kind == PauseMenuStateKind QUIT
+        pause_menu.header_str = "DO YOU REALLY WANT TO QUIT?"
+        push(pause_menu.options_str, "NO")
+        push(pause_menu.options_str, "YES")
+    elif pause_menu.kind == PauseMenuStateKind SAVE
+        pause_menu.header_str = "SAVE"
+        push(pause_menu.options_str, "<BACK>")
+        for i in range(1, save_slots_count+1)
+            var is_empty = !has_save(i)
+            if is_empty
+                push(pause_menu.options_str, "SLOT {i} <EMPTY>")
+            else
+                push(pause_menu.options_str, "SLOT {i}")
+    elif pause_menu.kind == PauseMenuStateKind LOAD
+        pause_menu.header_str = "LOAD"
+        push(pause_menu.options_str, "<BACK>")
+        for i in range(0, save_slots_count+1)
+            var is_empty = !has_save(i)
+            var str = "SLOT {i}"
+            if i == 0
+                str = "QUICKSAVE"
+            if is_empty
+                push(pause_menu.options_str, "{str} <EMPTY>")
+            else
+                push(pause_menu.options_str, "{str}")
+
+    if dialog_up_pressed()
+        pause_menu.idx_selected--
+    if dialog_down_pressed()
+        pause_menu.idx_selected++
+
+    pause_menu.idx_selected = clamp(pause_menu.idx_selected, 0, length(pause_menu.options_str)-1)
+    
+    if dialog_back_pressed()
+        pause_menu.idx_selected = 0
+    elif !dialog_accept_pressed()
+        return
+
+    if pause_menu.kind == PauseMenuStateKind PAUSE
+        if pause_menu.idx_selected == 0
+            pause_menu = null
+            return
+        elif pause_menu.idx_selected == 1
+            pause_menu.kind = PauseMenuStateKind SAVE
+        elif pause_menu.idx_selected == 2
+            pause_menu.kind = PauseMenuStateKind LOAD
+        elif pause_menu.idx_selected == 3
+            pause_menu.kind = PauseMenuStateKind QUIT
+        else
+            assert(false)
+        pause_menu.idx_selected = 0
+        return
+    elif pause_menu.kind == PauseMenuStateKind QUIT
+        if pause_menu.idx_selected == 0
+            pause_menu.kind = PauseMenuStateKind PAUSE
+        elif pause_menu.idx_selected == 1
+            schedule_quit_game()
+        pass
+    elif pause_menu.kind == PauseMenuStateKind SAVE
+        if pause_menu.idx_selected == 0
+            pause_menu.kind = PauseMenuStateKind PAUSE
+        else
+            var slot = pause_menu.idx_selected
+            save(slot)
+            pause_menu = null
+            return
+    elif pause_menu.kind == PauseMenuStateKind LOAD
+        if pause_menu.idx_selected == 0
+            pause_menu.kind = PauseMenuStateKind PAUSE
+        else
+            var slot = pause_menu.idx_selected - 1
+            var has = has_save(slot)
+            if has
+                load(slot)
+                pause_menu = null
+            return
+
 [export]
 def act(_dt: float)
+    if pause_menu != null
+        update_pause_menu()
+        return
+    if get_key_down(VK_ESCAPE)
+        pause_menu = new PauseMenuState()
+        return
+
     var is_rapid_timescale = false
     if player.anim.kind == AnimKind SLEEP || player.anim.kind == AnimKind SLEEP_IN_BED
         var is_anyone_awake = false
@@ -1790,8 +2086,7 @@ def act(_dt: float)
         dt = min(dt, 0.15)
     if dbg_mode
         set_window_title("wasisdasbox {int(1.0/_dt)}fps, dt={dt}")
-    if get_key(VK_ESCAPE)
-        schedule_quit_game()
+
     //log("time_scale={time_scale}; dt = {dt}")
 
     update_env(dt)
@@ -1848,9 +2143,9 @@ def act(_dt: float)
             log("dbg_time_scale = {dbg_time_scale}")
 
     if get_key_down(VK_F6)
-        save()
+        save(0)
     if get_key_down(VK_F7)
-        load()
+        load(0)
     if get_key_down(VK_F8) && dbg_mode
         heap_report()
 
@@ -1867,11 +2162,6 @@ def act(_dt: float)
             die(*ch)
             continue
 
-        if ch.anim.kind == AnimKind SLEEP || ch.anim.kind == AnimKind SLEEP_IN_BED
-            ch.anim.t = 0.0
-            ch.speed = 0.0
-            ch.velocity = float2(0.0,0.0)
-            continue
 
         if ch.kind == TileKind SHEEP_SHEARED
             if world_state.day_float > ch.saved_float + gamedays_to_grow_wool
@@ -1891,6 +2181,12 @@ def act(_dt: float)
             ch.health = max(0.0, ch.health - dt * health_loss_from_hunger_per_hour * hours_per_second)
         else
             ch.health = min(1.0, ch.health + dt * health_gain_from_no_hunger_per_hour * hours_per_second)
+
+        if ch.anim.kind == AnimKind SLEEP || ch.anim.kind == AnimKind SLEEP_IN_BED
+            ch.anim.t = 0.0
+            ch.speed = 0.0
+            ch.velocity = float2(0.0,0.0)
+            continue
 
         if !is_rapid_timescale
             ch.position += ch.velocity * dt
@@ -1931,9 +2227,9 @@ def act(_dt: float)
             handle_anim_finished(tile)
         grid_items->setTile(tile)
 
-    wheat_grow_timer += dt
-    if wheat_grow_timer > wheat_grow_period
-        wheat_grow_timer -= wheat_grow_period
+    world_state.wheat_grow_timer += dt
+    if world_state.wheat_grow_timer > wheat_grow_period
+        world_state.wheat_grow_timer -= wheat_grow_period
         //TODO separate array for such things for optimization
         for tile in grid_items.tiles
             if tile.kind == TileKind PLANTED_SEEDS
@@ -1945,9 +2241,80 @@ def act(_dt: float)
             else
                 continue
             grid_items->setTile(tile)
+
+    world_state.grass_grow_timer += dt
+    if world_state.grass_grow_timer > grass_grow_one_period
+        world_state.grass_grow_timer -= grass_grow_one_period
+        world_state.grass_grow_idx = (world_state.grass_grow_idx + grass_grow_periods_add) % grass_grow_periods_count
+        var currentIdx = world_state.grass_grow_idx
+        for tile in grid_ground_decals.tiles
+            var idx = tile.position.x + tile.position.y * grid_items.width
+            if (idx % grass_grow_periods_count) != world_state.grass_grow_idx
+                continue
+            if grid_ground->getTileInt(tile.position).kind != TileKind GRASS
+                continue
+            if tile.kind == TileKind DECAL_SMALL
+                tile.kind = TileKind NONE
+            else
+                continue
+            grid_items->setTile(tile)
+
+    world_state.tree_grow_timer += dt
+    if world_state.tree_grow_timer > tree_grow_one_period
+        world_state.tree_grow_timer -= tree_grow_one_period
+        world_state.tree_grow_idx = (world_state.tree_grow_idx + tree_grow_periods_add) % tree_grow_periods_count
+        var currentIdx = world_state.tree_grow_idx
+        for tile in grid_items.tiles
+            var idx = tile.position.x + tile.position.y * grid_items.width
+            if (idx % tree_grow_periods_count) != world_state.tree_grow_idx
+                continue
+            var kind = tile.kind
+            if tile.kind == TileKind TREE_GREEN_SMALL
+                kind = TileKind TREE_GREEN
+                tile.saved_float = 0.0
+            if tile.kind == TileKind TREE_RED_SMALL
+                kind = TileKind TREE_RED
+                tile.saved_float = 0.0
+            if tile.kind == TileKind TREE_YELLOW_SMALL
+                kind = TileKind TREE_YELLOW
+                tile.saved_float = 0.0
+            if tile.kind == TileKind NONE
+                let free_radius = 2
+                var ground_tile = grid_ground->getTileInt(tile.position)
+                var can_appear = (ground_tile.kind == TileKind GRASS || ground_tile.kind == TileKind SOIL) && grid_ground_decals->getTileInt(tile.position).kind != TileKind DECAL_PREPARED_SOIL
+                for dx in range(-free_radius, free_radius+1)
+                    if !can_appear
+                        break
+                    for dy in range(-free_radius, free_radius+1)
+                        if grid_items->getTileInt(tile.position + int2(dx,dy)).kind != TileKind NONE
+                            can_appear = false
+                            break
+                if can_appear
+                    var r = random_float(seed)
+                    if r > 0.5
+                        kind = TileKind TREE_GREEN_SMALL
+                    elif r > 0.125/2.0
+                        kind = TileKind TREE_YELLOW_SMALL
+                    else
+                        kind = TileKind TREE_RED_SMALL
+
+                    ground_tile.kind = TileKind GRASS
+                    grid_ground->setTile(ground_tile)
+
+            if tile.kind != kind
+                tile.kind = kind
+                grid_items->setTile(tile)
+
+    //TODO this is ridiculous
+    for tile in grid_items.tiles
+        if tile.kind == TileKind CAMPFIRE
+            tile.saved_float += dt
+            if tile.saved_float >= campfire_duration
+                tile.kind = TileKind CAMPFIRE_NO_WOOD
             
     for ch in aiCharacters
-        ch->Think(dt)
+        if !is_dead(*ch)
+            ch->Think(dt)
 
 
 def get_tile_texture_rect(kind : TileKind) : float4
@@ -1980,6 +2347,15 @@ def get_tile_texture_rect(kind : TileKind) : float4
     elif kind == TileKind TREE_RED
         x = 10
         y = 4
+    elif kind == TileKind TREE_GREEN_SMALL
+        x = 5
+        y = 7
+    elif kind == TileKind TREE_RED_SMALL
+        x = 6
+        y = 7
+    elif kind == TileKind TREE_YELLOW_SMALL
+        x = 7
+        y = 7
     elif kind == TileKind CHEST_IRON
         x = 19
         y = 4
@@ -2064,6 +2440,12 @@ def get_tile_texture_rect(kind : TileKind) : float4
     elif kind == TileKind CAMPFIRE_3
         x = 6
         y = 6
+    elif kind == TileKind CAMPFIRE_NO_WOOD
+        x = 8
+        y = 7
+    elif kind == TileKind CAMPFIRE_NO_FIRE
+        x = 9
+        y = 7
     elif kind == TileKind FLINT_STONE
         x = 8
         y = 6
@@ -2195,14 +2577,19 @@ def processCollisionRect(var deltaPos : float2&; halfSizeX : float; halfSizeY : 
             else
                 deltaPos.x += deltaDelta.x
 
-
 def processCollision(var charPos : float2&; tile : Tile)
     var deltaPos = charPos - float2(tile.position)
     if tile.kind == TileKind TREE_GREEN || tile.kind == TileKind TREE_YELLOW || tile.kind == TileKind TREE_RED
         processCollisionCircle(deltaPos, 0.3)
-    elif tile.kind == TileKind CHEST_IRON || tile.kind == TileKind WOOD || tile.kind == TileKind CAMPFIRE || tile.kind == TileKind WHEAT_COLLECTED_6 || tile.kind == TileKind STOVE || tile.kind == TileKind STOVE_WITH_COAL || tile.kind == TileKind STOVE_WITH_COAL_FIRED || tile.kind == TileKind FLOUR
+    elif tile.kind == TileKind TREE_GREEN_SMALL || tile.kind == TileKind TREE_YELLOW_SMALL || tile.kind == TileKind TREE_RED_SMALL
+        processCollisionCircle(deltaPos, 0.25)
+    elif tile.kind == TileKind CHEST_IRON || tile.kind == TileKind WOOD || tile.kind == TileKind WHEAT_COLLECTED_6 || tile.kind == TileKind STOVE || tile.kind == TileKind STOVE_WITH_COAL || tile.kind == TileKind STOVE_WITH_COAL_FIRED || tile.kind == TileKind FLOUR
         deltaPos.y -= 0.12
         processCollisionCircle(deltaPos, 0.4)
+        deltaPos.y += 0.12
+    elif tile.kind == TileKind CAMPFIRE_NO_FIRE || tile.kind == TileKind CAMPFIRE_NO_WOOD || tile.kind == TileKind CAMPFIRE
+        deltaPos.y -= 0.12
+        processCollisionCircle(deltaPos, 0.5)
         deltaPos.y += 0.12
     elif tile.kind == TileKind FENCE
         if grid_items->getTileInt(tile.position + int2(1, 0)).kind == TileKind FENCE
@@ -2439,6 +2826,19 @@ def draw_tile(tile : TileFloat)
         else
             assert(false)
 
+    if kind == TileKind WATER
+        pos.y -= tile.z * tileZToY + 0.2
+        let mult = 1.0
+        let t = (get_realtime_since_world_started())*mult
+        let f = frac(t)
+        if f > 0.75
+            kind = TileKind WATER_4
+        elif f > 0.5
+            kind = TileKind WATER_3
+        elif f > 0.25
+            kind = TileKind WATER_2
+        color = 0xffffffff
+
     if kind == TileKind CAMPFIRE
         let mult = 1.5
         let t = (get_realtime_since_world_started() + (pos.x*3.156345 + pos.y*4.842756))*mult
@@ -2456,18 +2856,6 @@ def draw_tile(tile : TileFloat)
     else
         color = lerp_colors_fix(0xff000000, color, calc_light(tile.position))//TODO smooth tile.pos for character
     
-    if kind == TileKind WATER
-        pos.y -= tile.z * tileZToY + 0.2
-        let mult = 1.0
-        let t = (get_realtime_since_world_started())*mult
-        let f = frac(t)
-        if f > 0.75
-            kind = TileKind WATER_4
-        elif f > 0.5
-            kind = TileKind WATER_3
-        elif f > 0.25
-            kind = TileKind WATER_2
-
 
 
     if mirrorX
@@ -2477,7 +2865,7 @@ def draw_tile(tile : TileFloat)
     size *= float2(tileSizeX,tileSizeY) * camera.scale
     var texture_rect = get_tile_texture_rect(kind)
 
-    color = lerp_colors_fix(0xff000000, color, calc_light(tile.position))
+    //color = lerp_colors_fix(0xff000000, color, calc_light(tile.position))
 
     if kind == TileKind PLANTED_SEEDS || kind == TileKind WHEAT_SMALL || kind == TileKind WHEAT_MEDIUM || kind == TileKind WHEAT_FULL
         pos.y -= 1.0
@@ -2498,7 +2886,12 @@ def draw_tile(tile : TileFloat)
 
     if is_bread(kind)
         for i in range(get_bread_count(kind)-1)
+            color = lerp_colors_fix(0xff000000, tile.color, calc_light(tile.position) * (1.0 - float(i + 1) / 24.0))
             clip_space_pos = camera->worldToScreen(pos + offset_from_pivot + float2(0.0, float(i+1)*2.0 / 7.0))
+            if i % 2 == 0
+                clip_space_pos.x += 1.0
+            else 
+                clip_space_pos.x -= 1.0
             draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, angle, pivot.x, pivot.y)
 
 struct TileWithPriority
@@ -2611,6 +3004,11 @@ def draw_character_stats(character : Character?; _pos : float2; invertX : bool)
         //size.x = -size.x
         pos.x = float(get_screen_width()) / ui_scale - pos.x
 
+    var is_loosing_health = hunger == 0
+    if is_loosing_health && health > 0 && time % 1.0 > 0.5
+        health = health - 1
+
+
     for i in range(0, max_health / 2)
         if health >= i * 2 + 2
             texture_rect = get_tile_texture_rect(TileKind HEART_FULL)
@@ -2618,6 +3016,7 @@ def draw_character_stats(character : Character?; _pos : float2; invertX : bool)
             texture_rect = get_tile_texture_rect(TileKind HEART_HALF)
         else
             texture_rect = get_tile_texture_rect(TileKind HEART_EMPTY)
+
         var clip_space_pos = float2(pos.x + deltaX * float(i),0.0 + pos.y)*ui_scale
 
         draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, 0.0, 0.5f,0.5f)
@@ -2655,8 +3054,8 @@ def draw_ui()
     var npc = get_nearest_npc(player.position)
     if npc != null
         draw_character_stats(npc, float2(10.0,0.0), true)
-        //clear(dbg_msg)
-        //log(npc.dbg_str)
+        clear(dbg_msg)
+        log(npc.dbg_str)
 
     //health
     color = 0xffffffff
@@ -2694,11 +3093,26 @@ def draw_ui()
     y += 20
 
     var population = 0
+    var avg_hunger = 0.0
+    var avg_health = 0.0
     for c in characters
-        if is_human(c.kind)
+        if is_human(c.kind) && !is_dead(*c)
             population += 1
+            avg_hunger += c.hunger
+            avg_health += c.health
+
     text_out(10,y, "population: {population}", 0xffffffff)
-    y += 20
+    y += 20     
+    if population > 0
+        avg_hunger /= float(population)
+        avg_health /= float(population)   
+        //var s = format("", avg_hunger)
+        var avg_hunger_str = "{roundi(avg_hunger*30.0)/10}.{roundi(avg_hunger*30.0)%10}"
+        var avg_health_str = "{roundi(avg_health*30.0)/10}.{roundi(avg_health*30.0)%10}"
+        text_out(10,y, "avg_hunger: {avg_hunger_str}/3", 0xffffffff)
+        y += 20    
+        text_out(10,y, "avg_health: {avg_health_str}/3", 0xffffffff)
+        y += 20
 
     if dbg_mode
         for i in range(length(dbg_msg))
@@ -2722,6 +3136,9 @@ def draw_ui()
 
     if current_dialog != null
         ui_draw_dialog(*current_dialog)
+
+    if pause_menu != null
+        ui_draw_pause_menu()
 
 
 var current_dialog : DialogState?
@@ -2790,11 +3207,17 @@ def ai_command_from_dialog(dialog : DialogState) : AiCommand
         return ai_command_do_default_action_on_a(dialog.first_action_tile_kind)
     elif dialog.first_action == DialogFirstAction MAKE
         if dialog.first_action_tile_kind == TileKind CAMPFIRE
-            return ai_command_bring_a_to_b(TileKind FLINT_STONE, TileKind WOOD)
+            var cmd : AiCommand
+            cmd.kind = AiCommandKind MAKE_FIRE
+            return cmd
         elif dialog.first_action_tile_kind == TileKind FENCE
             return ai_command_bring_a_to_b(TileKind WOOD, TileKind WOOD)
         elif dialog.first_action_tile_kind == TileKind WHEAT_STACK
             return ai_command_make_wheat_stacks()
+        elif dialog.first_action_tile_kind == TileKind BREAD
+            var cmd : AiCommand
+            cmd.kind = AiCommandKind MAKE_BREAD
+            return cmd
     elif dialog.first_action == DialogFirstAction PLOW_GROUND
         return ai_command_plow_ground()
     elif dialog.first_action == DialogFirstAction PLANT
@@ -2834,6 +3257,7 @@ def update_dialog(var dialog_state : DialogState?) : bool
     push(makeable_items, TileKind CAMPFIRE)
     push(makeable_items, TileKind FENCE)
     push(makeable_items, TileKind WHEAT_STACK)
+    push(makeable_items, TileKind BREAD)
 
     var cutable_items : array<TileKind>
     push(cutable_items, TileKind TREE)
@@ -2897,14 +3321,14 @@ def update_dialog(var dialog_state : DialogState?) : bool
     if dialog_state.ui_message == ""
         dialog_state.ui_message = "???"
     
-    if get_key_down(VK_W)
+    if dialog_up_pressed()
         dialog_state.i_current_option -= 1
-    if get_key_down(VK_S)
+    if dialog_down_pressed()
         dialog_state.i_current_option += 1
     dialog_state.i_current_option = clamp(dialog_state.i_current_option, 0, length(dialog_state.ui_options)-1)
 
 
-    if get_key_down(VK_SPACE)
+    if dialog_accept_pressed()
         if !dialog_state.had_greeting
             dialog_state.character.is_name_known = true
             if 0 == dialog_state.i_current_option
