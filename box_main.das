@@ -12,6 +12,8 @@ var dbg_mode : bool = true
 var draw_grid = false
 var dbg_time_scale = 1.0
 
+let game_name = "WORKING TITLE"
+
 var time_scale = 1.0
 var player_sleep_time_scale_when_everyone_sleeps = 50.0
 var player_sleep_time_scale = 10.0
@@ -23,32 +25,34 @@ var night_percent = 0.0
 var rain_percent = 0.0
 
 //--------------------------------params_begin--------------------------------
-var wheat_grow_period = 15.0 / 3.0
-var grass_grow_periods_add = 73 //prime only please
-var grass_grow_periods_count = 11 //prime only please
-var tree_grow_periods_add = 73 //prime only please
-var tree_grow_periods_count = 11 //prime only please
-var map_size = int2(20,20)
-var npcCount = 30
-var gamedays_per_hour = 12.0
-var hunger_per_hour = gamedays_per_hour
-var health_loss_from_hunger_per_hour = gamedays_per_hour / 3.0 
-var health_gain_from_no_hunger_per_hour = gamedays_per_hour / 3.0 
-var gamedays_to_grow_wool = 2.0
-var seconds_per_gameday = seconds_per_hour / gamedays_per_hour
-var grass_grow_one_period = seconds_per_gameday / float(grass_grow_periods_count)
-var tree_grow_one_period = seconds_per_gameday / float(tree_grow_periods_count)
-var initial_day_float = 1.0 + 6.0 / 24.0
-var campfire_duration = seconds_per_gameday * 2.0 / 3.0
+let wheat_grow_period = 15.0 / 3.0
+let grass_grow_periods_add = 73 //prime only please
+let grass_grow_periods_count = 11 //prime only please
+let tree_grow_periods_add = 73 //prime only please
+let tree_grow_periods_count = 11 //prime only please
+let map_size_default = int2(20,20)
+let npcCount = 10
+let gamedays_per_hour = 12.0
+let hunger_per_hour = gamedays_per_hour
+let health_loss_from_hunger_per_hour = gamedays_per_hour / 3.0 
+let health_gain_from_no_hunger_per_hour = gamedays_per_hour / 3.0 
+let gamedays_to_grow_wool = 2.0
+let seconds_per_gameday = seconds_per_hour / gamedays_per_hour
+let grass_grow_one_period = seconds_per_gameday / float(grass_grow_periods_count)
+let tree_grow_one_period = seconds_per_gameday / float(tree_grow_periods_count)
+let initial_day_float = 1.0 + 6.0 / 24.0
+let campfire_duration = seconds_per_gameday * 2.0 / 3.0
+let good_health_and_no_hunger_to_new_human_duration = seconds_per_gameday
 //--------------------------------params_end--------------------------------
 
-var pieces : ImageHandle
+var map_size = map_size_default
+var map_size_f = float2(float(map_size.x),float(map_size.y))
 var tiles : ImageHandle
 
 var grid_ground = new Grid()
 var grid_ground_decals = new Grid()
 var grid_items = new Grid()
-var player = new Player()
+var player : Player?
 
 var tileSizeY = 28.0
 var tileSizeX = 18.0
@@ -62,8 +66,7 @@ var topDownYToY = tileFloorSizeX / tileFloorSizeY
 var characters : array<Character?>
 var aiCharacters : array<AiCharacter?>
 
-var map_size_f = float2(float(map_size.x),float(map_size.y))
-var seed : int4
+var seed : int4 = int4(0,0,0,0)//TODO move to world_state ? 
 
 var sounds : table<string; SoundHandle>
 var empty_sound : SoundHandle
@@ -78,6 +81,8 @@ struct WorldState
     grass_grow_idx : int = 0
     tree_grow_timer : float = 0.0
     tree_grow_idx : int = 0
+    max_population : int = 0
+    good_health_and_no_hunger_duration : float = 0.0
 
 def get_realtime_since_world_started() : float
     return (world_state.day_float - initial_day_float) * seconds_per_gameday
@@ -416,6 +421,7 @@ class Character
     velocity : float2
     name : string
     is_name_known : bool
+    is_highlighted : bool
     z : float
     speed : float
     kind : TileKind
@@ -479,6 +485,9 @@ def is_human(kind : TileKind) : bool
 def get_current_hour_float() : float
     var time_float = world_state.day_float - float(trunci(world_state.day_float))
     return time_float * 24.0
+
+def get_current_day() : int
+    return int(world_state.day_float)
 
 def get_current_hour() : int
     return int(get_current_hour_float())
@@ -956,53 +965,18 @@ def ai_command_bring_a_to_b(a : TileKind; b : TileKind) : AiCommand
     command.b_tile = b
     return command
 
-// 'initialize' runs once when game starts and every hot-reload
-[export]
-def initialize
-    set_window_title("wasisdasbox")
-    set_resolution(960, 640)//TODO
-    pieces <- create_managed_image("piece.png") 
-    pieces |> set_image_smooth(true)
-    pieces |> set_image_use_mipmap()
-    
-    var empty_sound_raw : array<float>
-    empty_sound = create_managed_sound(44100, empty_sound_raw)
+def init_level_default()
+    clear(characters)
+    clear(aiCharacters)
+    player = null
+    seed = int4(0,0,0,0)
 
-    tiles <- create_managed_image("tiles.png") 
-    camera.scale = 3.0
+    map_size = map_size_default
+    map_size_f = float2(map_size)
 
     grid_ground = generate_default_ground_grid(map_size.x, map_size.y)
     grid_items = generate_default_grid(map_size.x, map_size.y, grid_ground)
     grid_ground_decals = generate_default_grid(map_size.x, map_size.y, grid_ground)
-
-    push(all_human_names, "Noël")
-    push(all_human_names, "Jérôme")
-    push(all_human_names, "Gilles")
-    push(all_human_names, "Margot")
-    push(all_human_names, "Margaret")
-    push(all_human_names, "Renée")
-    push(all_human_names, "Émilie")
-    push(all_human_names, "Danielle")
-    push(all_human_names, "Thierry")
-    push(all_human_names, "Guy Morel")
-    push(all_human_names, "Isaac")
-    push(all_human_names, "Margaux")
-    push(all_human_names, "Luc")
-    push(all_human_names, "Françoise")
-    push(all_human_names, "Odette Lombard")
-    push(all_human_names, "Claire Fernandes")
-    push(all_human_names, "Roland")
-    push(all_human_names, "Zoé")
-    push(all_human_names, "Jacques Lecoq")
-    push(all_human_names, "Valérie")
-    push(all_human_names, "Alain")
-    push(all_human_names, "Benoît")
-    push(all_human_names, "Anouk")
-    push(all_human_names, "Joseph")
-    push(all_human_names, "Nathalie")
-    push(all_human_names, "Lucas Vidal")
-    push(all_human_names, "Christiane")
-    push(all_human_names, "Astrid")
 
     for x in range(0, map_size.x)
         for y in range(0, map_size.y)
@@ -1042,6 +1016,7 @@ def initialize
                     decalTile.kind = TileKind DECAL_BIG
             grid_ground_decals.tiles[idx] = decalTile
 
+    player = new Player()
     player.position = float2(float(grid_ground.width), float(grid_ground.height )) / 2.0
     player.kind = TileKind HUMAN
     camera.position = player.position - float2(3.0,3.0)
@@ -1074,8 +1049,6 @@ def initialize
 
         push(characters, npc)
         push(aiCharacters, npc)
-
-    //make_dialog(aiCharacters[0])
 
     if dbg_mode
         var itemsList : array<TileKind>
@@ -1122,6 +1095,50 @@ def initialize
             var tile = grid_ground->getTileInt(int2(i - length(groundTilesList) / 2 + grid_ground.width / 2, 4 + grid_ground.height / 2))
             tile.kind = groundTilesList[i]
             grid_ground->setTile(tile)
+
+// 'initialize' runs once when game starts and every hot-reload
+[export]
+def initialize
+    set_window_title(game_name)
+    set_resolution(960, 640)//TODO
+    //set_resolution(1920, 1080)
+    
+    var empty_sound_raw : array<float>
+    empty_sound = create_managed_sound(44100, empty_sound_raw)
+
+    tiles <- create_managed_image("tiles.png") 
+    camera.scale = 3.0
+
+    push(all_human_names, "Noël")
+    push(all_human_names, "Jérôme")
+    push(all_human_names, "Gilles")
+    push(all_human_names, "Margot")
+    push(all_human_names, "Margaret")
+    push(all_human_names, "Renée")
+    push(all_human_names, "Émilie")
+    push(all_human_names, "Danielle")
+    push(all_human_names, "Thierry")
+    push(all_human_names, "Guy Morel")
+    push(all_human_names, "Isaac")
+    push(all_human_names, "Margaux")
+    push(all_human_names, "Luc")
+    push(all_human_names, "Françoise")
+    push(all_human_names, "Odette Lombard")
+    push(all_human_names, "Claire Fernandes")
+    push(all_human_names, "Roland")
+    push(all_human_names, "Zoé")
+    push(all_human_names, "Jacques Lecoq")
+    push(all_human_names, "Valérie")
+    push(all_human_names, "Alain")
+    push(all_human_names, "Benoît")
+    push(all_human_names, "Anouk")
+    push(all_human_names, "Joseph")
+    push(all_human_names, "Nathalie")
+    push(all_human_names, "Lucas Vidal")
+    push(all_human_names, "Christiane")
+    push(all_human_names, "Astrid")
+
+    init_level_default()
 
 
 class Camera
@@ -1581,6 +1598,22 @@ def can_do_alt_action(var character : Character; at_pos : int2) : bool
 
 let invalid_tile_pos = int2(-9999,-9999)
 
+def get_highlight_kind(kind : TileKind) : TileKind
+    if kind == TileKind HORSE
+        return TileKind HORSE_HIGHLIGHT
+    elif kind == TileKind CHILD_A
+        return TileKind CHILD_A_HIGHLIGHT
+    elif kind == TileKind CHILD_B
+        return TileKind CHILD_B_HIGHLIGHT
+    elif kind == TileKind HUMAN
+        return TileKind HUMAN_HIGHLIGHT
+    elif kind == TileKind SHEEP
+        return TileKind SHEEP_HIGHLIGHT
+    elif kind == TileKind SHEEP_SHEARED
+        return TileKind SHEEP_SHEARED_HIGHLIGHT
+    assert(false)
+    return TileKind NONE
+
 def clear_alt_action_highlight()
     if highlightedAltActionNpc != null
         set_highlighted(highlightedAltActionNpc, false)
@@ -1635,6 +1668,8 @@ def set_highlighted(tilePos : int2; is_highlighted : bool)
 
 var highlightedAltActionNpc : Character?
 def set_highlighted(var character : Character?; is_highlighted : bool)
+    character.is_highlighted = is_highlighted
+    return
     if is_highlighted
         character.color = 0xffffff80
     else
@@ -1907,29 +1942,49 @@ enum PauseMenuStateKind
     SAVE
     LOAD
     QUIT
+    DEATH
 
 
 var pause_menu : PauseMenuState?
 
-def ui_draw_pause_menu_text(str : string; x_mid : int; var y : int&)
+def ui_draw_pause_menu_text(str : string; x_mid : int; var y : int&; color = 0xffffffff)
     var text_pos = int2(x_mid - int(get_text_size(str).x / 2.0), y)
-    text_out(text_pos.x,text_pos.y, str, 0xffffffff)
-    y += 30
+    text_out(text_pos.x,text_pos.y, str, color)
+    y += 30 * ui_count_lines(str)
+
+def ui_count_lines(str : string) : int
+    if length(str) == 0
+        return 0
+    var count = 1
+    var was_space = false
+    for ch in str
+        if was_space
+            count++
+            was_space = false
+        if ch == '\n'
+            was_space = true
+    return count
 
 
 def ui_draw_pause_menu()
-    var size = int2(300,300) - int2(0,30 + 30*4)
+    var size = int2(350,320) - int2(0,30 + 30*4 + 30)
+    //size += int2(0, 30)
+    size += int2(0, ui_count_lines(pause_menu.header_str) * 30)
+    size += int2(0, ui_count_lines(pause_menu.footer_str) * 30)
     size += int2(0, length(pause_menu.options_str) * 30)
 
-    if length(pause_menu.footer_str) > 0
-        var extra_lines = 4
-        size += int2(0, extra_lines * 30)
 
     var top = int2(get_screen_width() / 2 - size.x / 2, get_screen_height() / 2 - 200)
-    fill_rect(top.x, top.y, size.x , size.y ,0x80000000)
+    fill_rect(top.x, top.y, size.x , size.y ,0xa0000000)
+    fill_rect(top.x, top.y, size.x , 40 ,0xffffffff)
+    fill_rect(top.x, top.y + size.y - 5, size.x , 5 ,0xffffffff)
 
     var y = get_screen_height() / 2 - 150
     var x_mid = get_screen_width() / 2
+
+    y -= 40
+    ui_draw_pause_menu_text("[{game_name}]", x_mid, y, 0xff000000)
+    y += 30
 
     ui_draw_pause_menu_text(pause_menu.header_str, x_mid, y)
     y += 30
@@ -1959,6 +2014,7 @@ def dialog_back_pressed() : bool
 class PauseMenuState
     idx_selected : int
     kind : PauseMenuStateKind
+    is_death : bool
 
     header_str : string
     options_str : array<string>
@@ -2003,6 +2059,11 @@ def update_pause_menu()
                 push(pause_menu.options_str, "{str} <EMPTY>")
             else
                 push(pause_menu.options_str, "{str}")
+    elif pause_menu.kind == PauseMenuStateKind DEATH
+        pause_menu.header_str = "YOU DIED\nDAY: {get_current_day()}\nMAX POPULATION: {world_state.max_population}"
+        push(pause_menu.options_str, "RESTART")
+        push(pause_menu.options_str, "LOAD")
+        push(pause_menu.options_str, "QUIT")
 
     if dialog_up_pressed()
         pause_menu.idx_selected--
@@ -2032,34 +2093,56 @@ def update_pause_menu()
         return
     elif pause_menu.kind == PauseMenuStateKind QUIT
         if pause_menu.idx_selected == 0
-            pause_menu.kind = PauseMenuStateKind PAUSE
+            pause_menu.kind = pause_menu.is_death ? PauseMenuStateKind DEATH : PauseMenuStateKind PAUSE
+            pause_menu.idx_selected = pause_menu.is_death ? 2 : 3
         elif pause_menu.idx_selected == 1
             schedule_quit_game()
+            pause_menu.idx_selected = 0
         pass
     elif pause_menu.kind == PauseMenuStateKind SAVE
         if pause_menu.idx_selected == 0
             pause_menu.kind = PauseMenuStateKind PAUSE
+            pause_menu.idx_selected = 1
         else
             var slot = pause_menu.idx_selected
             save(slot)
             pause_menu = null
-            return
     elif pause_menu.kind == PauseMenuStateKind LOAD
         if pause_menu.idx_selected == 0
-            pause_menu.kind = PauseMenuStateKind PAUSE
+            pause_menu.kind = pause_menu.is_death ? PauseMenuStateKind DEATH : PauseMenuStateKind PAUSE
+            pause_menu.idx_selected = pause_menu.is_death ? 1 : 2
         else
             var slot = pause_menu.idx_selected - 1
             var has = has_save(slot)
             if has
                 load(slot)
                 pause_menu = null
+    elif pause_menu.kind == PauseMenuStateKind DEATH
+        if pause_menu.idx_selected == 0
+            init_level_default()
+            pause_menu = null
             return
+        elif pause_menu.idx_selected == 1
+            pause_menu.kind = PauseMenuStateKind LOAD
+        elif pause_menu.idx_selected == 2
+            pause_menu.kind = PauseMenuStateKind QUIT
+        else
+            assert(false)
+        pause_menu.idx_selected = 0
 
 [export]
 def act(_dt: float)
     if pause_menu != null
         update_pause_menu()
         return
+
+    if is_dead(*player)
+        //TODO some delay for animation (and maybe no pause at all)
+        pause_menu = new PauseMenuState()
+        pause_menu.is_death = true
+        pause_menu.kind = PauseMenuStateKind DEATH
+        return
+
     if get_key_down(VK_ESCAPE)
         pause_menu = new PauseMenuState()
         return
@@ -2085,13 +2168,54 @@ def act(_dt: float)
     if !is_rapid_timescale
         dt = min(dt, 0.15)
     if dbg_mode
-        set_window_title("wasisdasbox {int(1.0/_dt)}fps, dt={dt}")
+        set_window_title("{game_name} {int(1.0/_dt)}fps, dt={dt}")
 
     //log("time_scale={time_scale}; dt = {dt}")
 
     update_env(dt)
 
-    var player_can_move = true
+    
+    population = 0
+    avg_hunger = 0.0
+    avg_health = 0.0
+    for c in characters
+        if is_human(c.kind) && !is_dead(*c)
+            population += 1
+            avg_hunger += c.hunger
+            avg_health += c.health
+    if population > 0
+        avg_hunger /= float(population)
+        avg_health /= float(population)   
+
+    world_state.max_population = max(world_state.max_population, population)
+
+    if avg_hunger * 3.0 <= 2.0 && avg_health * 3.0 >= 2.0
+        world_state.good_health_and_no_hunger_duration += dt
+    else
+        world_state.good_health_and_no_hunger_duration = max(0.0, world_state.good_health_and_no_hunger_duration - dt)
+    if world_state.good_health_and_no_hunger_duration >= good_health_and_no_hunger_to_new_human_duration
+        world_state.good_health_and_no_hunger_duration = 0.0
+
+        var new_character = new AiCharacter()
+
+        new_character.position = float2(random_float(seed) * float(map_size.x), random_float(seed) * float(map_size.y))
+        new_character.target_position = new_character.position
+        var r = random_float(seed)
+        if r > 0.66666666
+            new_character.kind = TileKind CHILD_A
+        elif r > 0.33333333
+            new_character.kind = TileKind CHILD_B
+        else
+            new_character.kind = TileKind HUMAN
+
+        if is_human(new_character.kind)
+            new_character.name = all_human_names[world_state.next_free_human_name]
+            world_state.next_free_human_name = (world_state.next_free_human_name + 1) % length(all_human_names)
+
+        push(characters, new_character)
+        push(aiCharacters, new_character)
+
+    var player_can_move = !is_dead(*player)
 
     player.velocity = float2(0.0)
     if current_dialog != null
@@ -2146,8 +2270,12 @@ def act(_dt: float)
         save(0)
     if get_key_down(VK_F7)
         load(0)
+        
     if get_key_down(VK_F8) && dbg_mode
         heap_report()
+    if get_key_down(VK_F9) && dbg_mode
+        if !is_dead(*player)
+            die(*player)
 
     player.velocity = clampLength(player.velocity, 1.0) * GetMaxSpeed(*player)
     if get_key(VK_LSHIFT) && dbg_mode
@@ -2327,10 +2455,10 @@ def get_tile_texture_rect(kind : TileKind) : float4
         x = 19
         y = 2
     elif kind == TileKind CHILD_A
-        x = 18
+        x = 17
         y = 2
     elif kind == TileKind CHILD_B
-        x = 17
+        x = 18
         y = 2
     elif kind == TileKind TILE_SELECTION
         x = 1
@@ -2529,6 +2657,24 @@ def get_tile_texture_rect(kind : TileKind) : float4
         y = 7
     elif is_bread(kind)
         x = 4
+        y = 7
+    elif kind == TileKind HORSE_HIGHLIGHT
+        x = 10
+        y = 7
+    elif kind == TileKind CHILD_A_HIGHLIGHT
+        x = 11
+        y = 7
+    elif kind == TileKind CHILD_B_HIGHLIGHT
+        x = 12
+        y = 7
+    elif kind == TileKind HUMAN_HIGHLIGHT
+        x = 13
+        y = 7
+    elif kind == TileKind SHEEP_HIGHLIGHT
+        x = 14
+        y = 7
+    elif kind == TileKind SHEEP_SHEARED_HIGHLIGHT
+        x = 15
         y = 7
 
     return float4(float(x)*tileSizeX,float(y)*tileSizeY,tileSizeX,tileSizeY)
@@ -2960,6 +3106,13 @@ def draw_character(character : Character?)
         text_out(clip_space_pos.x,clip_space_pos.y, "{character.name}", color)
 
     add_to_draw_queue(tile, 0)
+    if character.is_highlighted
+        var high = tile
+        high.color = 0x30ffffff
+        high.position.y -= 0.00001
+        log("{high.kind} = {get_highlight_kind(tile.kind)}")
+        high.kind = get_highlight_kind(tile.kind)
+        add_to_draw_queue(high, 0)
 
 def draw_tile_highlight(tile : Tile)
     var t = Tile()
@@ -3038,6 +3191,9 @@ def draw_character_stats(character : Character?; _pos : float2; invertX : bool)
         draw_image_transformed(tiles, clip_space_pos.x,clip_space_pos.y, texture_rect, color, size, 0.0, 0.5f,0.5f)
 
 
+var avg_hunger = 0.0
+var avg_health = 0.0
+var population = 0
 def draw_ui()
     let max_health = 6
     let max_hunger = 6
@@ -3051,19 +3207,21 @@ def draw_ui()
 
     draw_character_stats(player, float2(10.0,0.0), false)
 
+    var y = int(30.0 * ui_scale)
     var npc = get_nearest_npc(player.position)
     if npc != null
         draw_character_stats(npc, float2(10.0,0.0), true)
+        if npc.is_name_known
+            text_out(get_screen_width() - int(get_text_size(npc.name).x) - 10, y, npc.name, 0xffffffff)
         clear(dbg_msg)
         log(npc.dbg_str)
 
     //health
     color = 0xffffffff
 
-    var y = int(30.0 * ui_scale)
-    for kind, count in keys(player.items),values(player.items)
-        text_out(10,y, "{kind} {count}", 0xffffffff)
-        y += 20
+    // for kind, count in keys(player.items),values(player.items)
+    //     text_out(10,y, "{kind} {count}", 0xffffffff)
+    //     y += 20
 
     var hour_float = get_current_hour_float()
     var hour = int(hour_float)
@@ -3092,26 +3250,19 @@ def draw_ui()
     text_out(10,y, "{weather_state}", 0xffffffff)
     y += 20
 
-    var population = 0
-    var avg_hunger = 0.0
-    var avg_health = 0.0
-    for c in characters
-        if is_human(c.kind) && !is_dead(*c)
-            population += 1
-            avg_hunger += c.hunger
-            avg_health += c.health
-
     text_out(10,y, "population: {population}", 0xffffffff)
     y += 20     
     if population > 0
-        avg_hunger /= float(population)
-        avg_health /= float(population)   
         //var s = format("", avg_hunger)
         var avg_hunger_str = "{roundi(avg_hunger*30.0)/10}.{roundi(avg_hunger*30.0)%10}"
         var avg_health_str = "{roundi(avg_health*30.0)/10}.{roundi(avg_health*30.0)%10}"
-        text_out(10,y, "avg_hunger: {avg_hunger_str}/3", 0xffffffff)
+        text_out(10,y, "average hunger: {avg_hunger_str}/3", 0xffffffff)
         y += 20    
-        text_out(10,y, "avg_health: {avg_health_str}/3", 0xffffffff)
+        text_out(10,y, "average health: {avg_health_str}/3", 0xffffffff)
+        y += 20
+        
+        var new_human_percent = world_state.good_health_and_no_hunger_duration / good_health_and_no_hunger_to_new_human_duration
+        text_out(10,y, "new human: {int(new_human_percent * 100.0)}%", 0xffffffff)
         y += 20
 
     if dbg_mode
