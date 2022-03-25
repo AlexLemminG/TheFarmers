@@ -1,7 +1,7 @@
 require math
 
-options debugger            // uncomment for debug in VS Code
-require daslib/debug        // uncomment for debug in VS Code
+//options debugger            // uncomment for debug in VS Code
+//require daslib/debug        // uncomment for debug in VS Code
 
 enum TileKind
     NONE
@@ -14,6 +14,9 @@ enum TileKind
     HUMAN
     CHILD_A
     CHILD_B
+    HUMAN_CLOTH
+    CHILD_A_CLOTH
+    CHILD_B_CLOTH
     WOOD
     TREE_GREEN
     TREE
@@ -31,6 +34,7 @@ enum TileKind
     DECAL_SMALL
     DECAL_BIG
     DECAL_PREPARED_SOIL
+    DECAL_PREPARED_AND_WATERED_SOIL
     HEART_FULL
     HEART_HALF
     HEART_EMPTY
@@ -50,7 +54,6 @@ enum TileKind
     WHEAT_STACK //special
     WHEAT_COLLECTED_NOT_6 //special
     WHEAT_COLLECTED_ANY //special
-    WHEAT //special
     GOLD
     HORSE
     SHEEP
@@ -97,6 +100,11 @@ enum TileKind
     CHILD_B_HIGHLIGHT
     SHEEP_HIGHLIGHT
     SHEEP_SHEARED_HIGHLIGHT
+    RAIN_EFFECT
+    FIRE //special
+    CLOTH
+    UI_SNOWFLAKE
+    UI_GAME_LOGO
 
 enum AnimKind
     NONE
@@ -107,6 +115,7 @@ enum AnimKind
     SLEEP
     SLEEP_IN_BED
     GROWING_BERRIES
+    APPEAR_FROM_CHEST
 
 struct Anim
     kind : AnimKind
@@ -186,6 +195,7 @@ class Grid
 
 enum SoundKind
     EAT_APPLE
+    EAT_BREAD
     CHOP
     TREE_FALL
     TREE_FALL_END
@@ -196,3 +206,9 @@ enum SoundKind
     FOOTSTEP
     GENERIC_ACTION
     FIRE_PUT_OUT
+    WHOOSH
+    BREAK_SMALL_TREE
+    DROP_WOOD
+    PUT_WOOD_TO_STOVE
+    SHEAR_SHEEP
+    EAT_GRASS
