@@ -17,6 +17,7 @@ enum TileKind
     HUMAN_CLOTH
     CHILD_A_CLOTH
     CHILD_B_CLOTH
+    HUMAN_ON_HORSE_CLOTH
     WOOD
     TREE_GREEN
     TREE
@@ -149,6 +150,9 @@ class Grid
     width : int
     height : int
     tiles : array<Tile>
+
+    def is_valid(pos : int2) : bool
+        return pos.x < width && pos.y < height && pos.x >= 0 && pos.y >= 0
 
     def getIdxInt(pos : int2) : int
         if pos.x >= width || pos.y >= height || pos.x < 0 || pos.y < 0
