@@ -115,7 +115,6 @@ enum AnimKind
     DEATH
     SLEEP
     SLEEP_IN_BED
-    GROWING_BERRIES
     APPEAR_FROM_CHEST
 
 struct Anim
