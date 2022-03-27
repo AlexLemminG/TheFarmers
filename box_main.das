@@ -132,7 +132,7 @@ def get_current_goal_str() : string
 
     let state = world_state.tutorial_state.state
     if state == TutorialStateEnum WAITING_FOR_PLAYER_TO_BRING_FLINTSTONE
-        return "BRING FLINTSTONE TO {aiCharacters[0].name}"
+        return "BRING FLINTSTONE TO {to_upper(aiCharacters[0].name)}"
 
     if state == TutorialStateEnum WAITING_FOR_PLAYER_TO_MAKE_FIRE
         return "START A FIRE"
@@ -196,7 +196,7 @@ def update_tutorial(dt : float)
         if npc.command.kind != AiCommandKind NONE || player.carry_item != TileKind FLINT_STONE
             return
         npc.target_position = player.position
-        if length(npc.position - player.position) < 0.5
+        if length(npc.position - player.position) < 1.0
             //TODO make player create this dialog manually
             var lines : array<string>
             var player_lines : array<string>
@@ -226,7 +226,7 @@ def update_tutorial(dt : float)
         if npc.command.kind != AiCommandKind NONE
             return
         npc.target_position = player.position
-        if length(npc.position - player.position) < 0.5
+        if length(npc.position - player.position) < 1.0
             var lines : array<string>
             var player_lines : array<string>
 
@@ -259,7 +259,7 @@ def update_tutorial(dt : float)
 
     if current_state.state == TutorialStateEnum WAITING_FOR_DIALOG_START_3
         npc.target_position = player.position
-        if length(npc.position - player.position) < 0.5
+        if length(npc.position - player.position) < 1.0
             var lines : array<string>
             var player_lines : array<string>
 
@@ -298,7 +298,7 @@ def update_tutorial(dt : float)
 
     if current_state.state == TutorialStateEnum WAITING_FOR_DIALOG_START_4
         npc.target_position = player.position
-        if length(npc.position - player.position) < 0.5
+        if length(npc.position - player.position) < 1.0
             var lines : array<string>
             var player_lines : array<string>
 
@@ -315,7 +315,7 @@ def update_tutorial(dt : float)
     if current_state.state == TutorialStateEnum WAITING_FOR_DIALOG_FINISH_4
         if current_dialog == null
             var msgs : array<string>
-            push(msgs, "MAKE BREAD")
+            push(msgs, "          MAKE BREAD")
             push(msgs, "(CHECK CRAFTBOOK IN PAUSE MENU)")
             show_tutorial_msgs(msgs)
             world_state.tutorial_state.state = TutorialStateEnum WAITING_FOR_MSG_BOX_TO_CLOSE_4
@@ -384,6 +384,12 @@ def update_rain_loop()
         s *= volume
     set_sound_data(rain_sound, data)
 
+var ambient_sound : SoundHandle
+def update_ambient_loop()
+    if ambient_sound.duration == 0.0
+        ambient_sound <- create_managed_sound("sounds/AMBIENT.mp3")
+        ambient_sound |> play_sound_loop(0.02)
+
 def play_sound(str : string; pos : float2; volumeMult : float = 1.0; pitchMult : float = 1.0)
     var snd = sounds[str]
     if snd.duration == 0.0
@@ -442,6 +448,8 @@ def play_sound(kind : SoundKind; pos : float2)
         volume = 0.4
         str = "{SoundKind EAT_APPLE}"
         pitch = random_float(1.9, 2.1)
+    elif kind == SoundKind UI_BLOCKED || kind == SoundKind UI_MOVE || kind == SoundKind UI_CLICK
+        volume = 0.2
 
     play_sound(str, pos, volume, pitch)
 
@@ -960,10 +968,17 @@ class AiCharacter : Character
             var leash_length = 1.0
             var leash_to_ground_distance = 2.0
             if leash == LeashKind TO_PLAYER
-                var delta = player.position - position
-                if length(delta) > 1.0
-                    target_position = position + clampLength(delta, length(delta) - leash_length)
-                preferedSpeed = min(length(delta), GetMaxSpeed(self))
+                if is_human(kind)
+                    var delta = position - player.position
+                    if length(delta) < 0.01
+                        delta = float2(0.0,1.0)
+                    delta = normalize(delta) / 3.0 * 2.0
+                    target_position = player.position + delta
+                else
+                    var delta = player.position - position
+                    if length(delta) > 1.0
+                        target_position = position + clampLength(delta, length(delta) - leash_length)
+                    preferedSpeed = min(length(delta), GetMaxSpeed(self))
             else
                 var delta = target_position - leash_to_ground_pos
                 var delta_l = length(delta)
@@ -1484,7 +1499,7 @@ def init_level_default()
     green_flag_tile.kind = TileKind GREEN_FLAG
     grid_items->setTile(green_flag_tile)
 
-    var wood_tile = grid_items->getTileInt(get_int_pos(player.position) + int2(-5,-2))
+    var wood_tile = grid_items->getTileInt(get_int_pos(player.position) + int2(2,-2))
     wood_tile.kind = TileKind WOOD
     grid_items->setTile(wood_tile)
 
@@ -1613,40 +1628,41 @@ def initialize
     camera.scale = 3.0
     //camera.scale = 0.6
 
-    push(all_human_names, "Noël")
-    push(all_human_names, "Jérôme")
-    push(all_human_names, "Gilles")
-    push(all_human_names, "Margot")
-    push(all_human_names, "Margaret")
-    push(all_human_names, "Renée")
-    push(all_human_names, "Émilie")
-    push(all_human_names, "Danielle")
-    push(all_human_names, "Thierry")
-    push(all_human_names, "Guy Morel")
-    push(all_human_names, "Isaac")
-    push(all_human_names, "Margaux")
-    push(all_human_names, "Luc")
-    push(all_human_names, "Françoise")
-    push(all_human_names, "Odette Lombard")
-    push(all_human_names, "Claire Fernandes")
-    push(all_human_names, "Roland")
-    push(all_human_names, "Zoé")
-    push(all_human_names, "Jacques Lecoq")
-    push(all_human_names, "Valérie")
-    push(all_human_names, "Alain")
-    push(all_human_names, "Benoît")
-    push(all_human_names, "Anouk")
-    push(all_human_names, "Joseph")
-    push(all_human_names, "Nathalie")
-    push(all_human_names, "Lucas Vidal")
-    push(all_human_names, "Christiane")
-    push(all_human_names, "Astrid")
+    push(all_human_names, "Margaux"             )
+    push(all_human_names, "Noël"                )
+    push(all_human_names, "Margot"              )
+    push(all_human_names, "Jérôme"              )
+    push(all_human_names, "Gilles"              )
+    push(all_human_names, "Margaret"            )
+    push(all_human_names, "Renée"               )
+    push(all_human_names, "Émilie"              )
+    push(all_human_names, "Danielle"            )
+    push(all_human_names, "Thierry"             )
+    push(all_human_names, "Guy Morel"           )
+    push(all_human_names, "Isaac"               )
+    push(all_human_names, "Luc"                 )
+    push(all_human_names, "Françoise"           )
+    push(all_human_names, "Odette Lombard"      )
+    push(all_human_names, "Claire Fernandes"    )
+    push(all_human_names, "Roland"              )
+    push(all_human_names, "Zoé"                 )
+    push(all_human_names, "Jacques Lecoq"       )
+    push(all_human_names, "Valérie"             )
+    push(all_human_names, "Alain"               )
+    push(all_human_names, "Benoît"              )
+    push(all_human_names, "Anouk"               )
+    push(all_human_names, "Joseph"              )
+    push(all_human_names, "Nathalie"            )
+    push(all_human_names, "Lucas Vidal"         )
+    push(all_human_names, "Christiane"          )
+    push(all_human_names, "Astrid"              )
 
     push(chest_items, TileKind FLINT_STONE)
     push(chest_items, TileKind BUCKET_EMPTY)
     push(chest_items, TileKind SHEEP_SHEARS)
     push(chest_items, TileKind RED_FLAG)
 
+    register_all_craft_rules()
 
     init_level_default()
 
@@ -1720,6 +1736,7 @@ def unprepare_ground_for_seeds2(pos : int2)
     grid_ground_decals->setTile(decalsTile)
 
 def open_chest(var chest : Tile)
+    play_sound(SoundKind GENERIC_ACTION, chest.position)
     var idx = world_state.next_chest_item % length(chest_items)
     world_state.next_chest_item = (world_state.next_chest_item + 1) % length(chest_items)
     var item = chest_items[idx]
@@ -1929,60 +1946,13 @@ def _craft(var character : Character; _itemTile : Tile; exec : bool) : bool
     var groundDecalTile = grid_ground_decals->getTileInt(itemTile.position)
     var groundKind = groundTile.kind
 
-    if (kind == TileKind STONE || kind == TileKind CAMPFIRE_NO_WOOD) && character.carry_item == TileKind WOOD
-        if exec
-            play_sound(SoundKind PUT_WOOD_TO_STOVE, character_pos)
-            kind = TileKind CAMPFIRE_NO_FIRE
-            character.carry_item = TileKind NONE
-        result = true
-    elif kind == TileKind CAMPFIRE_NO_FIRE && character.carry_item == TileKind FLINT_STONE
-        if exec
-            play_sound(SoundKind GENERIC_ACTION, character_pos)
-            kind = TileKind CAMPFIRE
-            itemTile.saved_float = 0.0
-        result = true
-    elif kind == TileKind WOOD && character.carry_item == TileKind WOOL
-        if exec
-            play_sound(SoundKind GENERIC_ACTION, character_pos)
-            kind = TileKind BED
-            character.carry_item = TileKind NONE
-        result = true
-    elif kind == TileKind WOOL && character.carry_item == TileKind WOOL
-        if exec
-            play_sound(SoundKind GENERIC_ACTION, character_pos)
-            kind = TileKind CLOTH
-            character.carry_item = TileKind NONE
-        result = true
-    elif kind == TileKind STONE && character.carry_item == TileKind STONE
-        if exec
-            play_sound(SoundKind GENERIC_ACTION, character_pos)
-            kind = TileKind STOVE
-            character.carry_item = TileKind NONE
-        result = true
-    elif kind == TileKind STOVE && (character.carry_item == TileKind COAL || character.carry_item == TileKind WOOD)
-        if exec
-            play_sound(SoundKind PUT_WOOD_TO_STOVE, itemTile.position)
-            kind = TileKind STOVE_WITH_COAL
-            character.carry_item = TileKind NONE
-        result = true
-    elif kind == TileKind STOVE_WITH_COAL && character.carry_item == TileKind FLINT_STONE
-        if exec
-            play_sound(SoundKind GENERIC_ACTION, character_pos)
-            kind = TileKind STOVE_WITH_COAL_FIRED
-            itemTile.saved_float = 0.0
-        result = true
-    elif kind == TileKind STOVE_WITH_COAL_FIRED && character.carry_item == TileKind FLOUR
+    if kind == TileKind STOVE_WITH_COAL_FIRED && character.carry_item == TileKind FLOUR
         if exec
             play_sound(SoundKind GENERIC_ACTION, character_pos)
             character.carry_item = TileKind BREAD_6
             itemTile.saved_float += 1.0
             if itemTile.saved_float >= 3.0
                 kind = TileKind STOVE
-        result = true
-    elif kind == TileKind WHEAT_COLLECTED_6 && character.carry_item == TileKind STONE
-        if exec
-            play_sound(SoundKind GENERIC_ACTION, character_pos)
-            kind = TileKind FLOUR
         result = true
     elif kind == TileKind CAMPFIRE && character.carry_item == TileKind BUCKET_WITH_WATER
         if exec
@@ -2035,18 +2005,6 @@ def _craft(var character : Character; _itemTile : Tile; exec : bool) : bool
             kind = TileKind PLANTED_SEEDS
             world_state.tutorial_state.player_planted_wheat = true //TODO only if player
         result = true
-    elif kind == TileKind WHEAT_FULL && character.carry_item == TileKind NONE
-        if exec
-            play_sound(SoundKind WHOOSH, character_pos)
-            kind = TileKind WHEAT_COLLECTED_2
-            unprepare_ground_for_seeds2(itemTile.position)
-        result = true
-    elif kind == TileKind WOOD && character.carry_item == TileKind WOOD
-        if exec
-            play_sound(SoundKind DROP_WOOD, character_pos)
-            kind = TileKind FENCE
-            character.carry_item = TileKind NONE
-        result = true
     elif kind == TileKind BUSH_WITH_BERRIES && character.carry_item == TileKind NONE
         if exec
             play_sound(SoundKind EAT_APPLE, character_pos)
@@ -2062,6 +2020,20 @@ def _craft(var character : Character; _itemTile : Tile; exec : bool) : bool
             kind = TileKind NONE
             itemTile.anim.kind = AnimKind NONE
         result = true
+    else
+        for rule in all_craft_rules
+            if rule.is_craftbook_only
+                continue
+            if rule.ground_tile_before == itemTile.kind && rule.carry_tile_before == character.carry_item
+                if exec
+                    play_sound(rule.sound, character_pos)
+                    kind = rule.ground_tile_after
+                    character.carry_item = rule.carry_tile_after
+                    itemTile.anim.kind = AnimKind NONE
+                    itemTile.saved_float = 0.0
+                result = true
+                break
+
     if result && exec
         itemTile.kind = kind
         grid_items->setTile(itemTile)
@@ -2071,6 +2043,61 @@ def _craft(var character : Character; _itemTile : Tile; exec : bool) : bool
         grid_ground->setTile(groundTile)
     
     return result
+
+struct CraftRule
+    ground_tile_before : TileKind
+    carry_tile_before : TileKind
+    ground_tile_after : TileKind
+    carry_tile_after : TileKind
+    sound : SoundKind
+    is_craftbook_only : bool
+    in_craftbook : bool
+
+var all_craft_rules : array<CraftRule>
+def register_craft_rule_craftbook_only(ground_tile_before : TileKind; carry_tile_before : TileKind; ground_tile_after : TileKind; carry_tile_after : TileKind; sound : SoundKind = SoundKind GENERIC_ACTION)
+    register_craft_rule(ground_tile_before, carry_tile_before, ground_tile_after, carry_tile_after, sound, true, true)
+
+def register_craft_rule_not_in_craftbook(ground_tile_before : TileKind; carry_tile_before : TileKind; ground_tile_after : TileKind; carry_tile_after : TileKind; sound : SoundKind = SoundKind GENERIC_ACTION)
+    register_craft_rule(ground_tile_before, carry_tile_before, ground_tile_after, carry_tile_after, sound, false, false)
+
+def register_craft_rule(ground_tile_before : TileKind; carry_tile_before : TileKind; ground_tile_after : TileKind; carry_tile_after : TileKind; sound : SoundKind = SoundKind GENERIC_ACTION; is_craftbook_only : bool = false; in_craftbook : bool = true)
+    assert(!is_craftbook_only || in_craftbook)
+    var rule : CraftRule
+    rule.ground_tile_before = ground_tile_before
+    rule.carry_tile_before = carry_tile_before
+    rule.ground_tile_after = ground_tile_after
+    rule.carry_tile_after = carry_tile_after
+    rule.is_craftbook_only = is_craftbook_only
+    rule.in_craftbook = in_craftbook
+    rule.sound = sound
+    push(all_craft_rules, rule)
+
+def register_all_craft_rules()
+	register_craft_rule(TileKind STONE, TileKind WOOD, TileKind CAMPFIRE_NO_FIRE, TileKind NONE, SoundKind PUT_WOOD_TO_STOVE)
+	register_craft_rule(TileKind CAMPFIRE_NO_WOOD, TileKind WOOD, TileKind CAMPFIRE_NO_FIRE, TileKind NONE, SoundKind PUT_WOOD_TO_STOVE)
+	
+	register_craft_rule(TileKind CAMPFIRE_NO_FIRE, TileKind FLINT_STONE, TileKind CAMPFIRE, TileKind FLINT_STONE)
+	
+	register_craft_rule(TileKind WOOD, TileKind WOOL, TileKind BED, TileKind NONE)
+	register_craft_rule(TileKind WOOL, TileKind WOOL, TileKind CLOTH, TileKind NONE)
+	register_craft_rule(TileKind STONE, TileKind STONE, TileKind STOVE, TileKind NONE)
+	//register_craft_rule(TileKind STOVE, TileKind COAL, TileKind STOVE_WITH_COAL, TileKind NONE, SoundKind PUT_WOOD_TO_STOVE)
+	register_craft_rule(TileKind STOVE, TileKind WOOD, TileKind STOVE_WITH_COAL, TileKind NONE, SoundKind PUT_WOOD_TO_STOVE)
+	
+	register_craft_rule(TileKind STOVE_WITH_COAL, TileKind FLINT_STONE, TileKind STOVE_WITH_COAL_FIRED, TileKind FLINT_STONE)
+	register_craft_rule_craftbook_only(TileKind STOVE_WITH_COAL_FIRED, TileKind FLOUR, TileKind STOVE_WITH_COAL_FIRED, TileKind BREAD_6)
+	register_craft_rule(TileKind WHEAT_COLLECTED_6, TileKind STONE, TileKind FLOUR, TileKind STONE)
+	register_craft_rule_craftbook_only(TileKind CAMPFIRE, TileKind BUCKET_WITH_WATER, TileKind CAMPFIRE_NO_WOOD, TileKind BUCKET_EMPTY)
+	register_craft_rule_craftbook_only(TileKind STOVE_WITH_COAL_FIRED, TileKind BUCKET_WITH_WATER, TileKind STOVE_WITH_COAL, TileKind BUCKET_EMPTY)
+	register_craft_rule_craftbook_only(TileKind DECAL_PREPARED_SOIL, TileKind BUCKET_WITH_WATER, TileKind DECAL_PREPARED_AND_WATERED_SOIL, TileKind BUCKET_EMPTY, SoundKind DROP_WATER)
+	
+	register_craft_rule_craftbook_only(TileKind WATER, TileKind BUCKET_EMPTY, TileKind WATER, TileKind BUCKET_WITH_WATER)
+	register_craft_rule_craftbook_only(TileKind WATER, TileKind WOOD, TileKind WOODEN_PLANE, TileKind NONE)
+	register_craft_rule_craftbook_only(TileKind DECAL_PREPARED_SOIL, TileKind WHEAT_COLLECTED_1, TileKind PLANTED_SEEDS, TileKind NONE)
+	//register_craft_rule_craftbook_only(TileKind WHEAT_COLLECTED_2, TileKind WHEAT_COLLECTED_2, TileKind NONE, TileKind WHEAT_COLLECTED_4)
+	register_craft_rule_not_in_craftbook(TileKind WHEAT_FULL, TileKind NONE, TileKind WHEAT_COLLECTED_2, TileKind NONE, SoundKind WHOOSH)//TODO not realy craft
+	register_craft_rule(TileKind WOOD, TileKind WOOD, TileKind FENCE, TileKind NONE, SoundKind DROP_WOOD)
+    pass
 
 def can_combine(a : TileKind; b : TileKind) : bool
     unsafe
@@ -2193,7 +2220,7 @@ def is_sleeping(character : Character) : bool
     return (character.anim.kind == AnimKind SLEEP || character.anim.kind == AnimKind SLEEP_IN_BED)
 
 def can_make_dialog(character : AiCharacter) : bool
-    return is_human(character.kind) && !is_dead(character) && !is_sleeping(character)
+    return is_human(character.kind) && !is_dead(character) && !is_sleeping(character) && (!character.command.do_once || character.command.kind == AiCommandKind NONE)
 
 def make_tutorial_dialog(character : AiCharacter?; character_lines : array<string>; player_lines : array<string>) : TutorialDialogState?
     if current_dialog != null
@@ -2480,6 +2507,7 @@ enum PauseMenuStateKind
     QUIT
     DEATH
     RESTART
+    CRAFTBOOK
 
 
 var pause_menu : PauseMenuState?
@@ -2532,8 +2560,14 @@ def ui_draw_simple_menu(menu : SimpleGenericMenu)
     size.y += length(menu.options_str) * text_height
 
     size.x = max(size.x, int(get_text_size(menu.header_str).x)+20)
+    for option in menu.options_str
+        size.x = max(size.x, int(get_text_size(option).x)+20)
+
 
     var top = int2(get_screen_width() / 2 - size.x / 2, get_screen_height() / 2 - 200)
+    if top.y + size.y > get_screen_height() - 50
+        top.y = get_screen_height() / 2 - size.y / 2
+
     fill_rect(top.x, top.y, size.x , size.y ,0xa0000000)
     fill_rect(top.x, top.y, size.x , top_bar_height ,0xffffffff)
     fill_rect(top.x, top.y + size.y - bottom_bar_height, size.x , bottom_bar_height ,0xffffffff)
@@ -2579,7 +2613,7 @@ class PauseMenuState : SimpleGenericMenu
     is_death : bool
 
 var save_slots_count = 3
-def update_pause_menu()
+def update_pause_menu(with_input : bool)
     clear(pause_menu.options_str)
     pause_menu.header_str = ""
     pause_menu.footer_str = ""
@@ -2587,6 +2621,8 @@ def update_pause_menu()
     if pause_menu.kind == PauseMenuStateKind PAUSE
         pause_menu.header_str = "PAUSE"
         push(pause_menu.options_str, "CONTINUE")
+        push(pause_menu.options_str, "CRAFTBOOK")
+        push(pause_menu.options_str, "RESTART")
         push(pause_menu.options_str, "SAVE")
         push(pause_menu.options_str, "LOAD")
         push(pause_menu.options_str, "QUIT")
@@ -2626,28 +2662,81 @@ def update_pause_menu()
         push(pause_menu.options_str, "<BACK>")
         push(pause_menu.options_str, "NO")
         push(pause_menu.options_str, "YES")
+    elif pause_menu.kind == PauseMenuStateKind CRAFTBOOK
+        pause_menu.header_str = "CRAFTBOOK"
+        push(pause_menu.options_str, "<BACK>")
+    //rule.ground_tile_before = ground_tile_before
+    //rule.carry_tile_before = carry_tile_before
+    //rule.ground_tile_after = ground_tile_after
+    //rule.carry_tile_after = carry_tile_after
+        for rule in all_craft_rules
+            if !rule.in_craftbook
+                continue
+            var str_before = ""
+            if rule.ground_tile_before != TileKind NONE && rule.carry_tile_before !=  TileKind NONE
+                str_before = " + "
+            if rule.ground_tile_before != TileKind NONE
+                str_before = readable_tile_name_for_craft(rule.ground_tile_before) + str_before
+            if rule.carry_tile_before != TileKind NONE
+                str_before = str_before + readable_tile_name_for_craft(rule.carry_tile_before)
 
-    if dialog_up_pressed()
+            var carry_tile_after = rule.carry_tile_after
+            var ground_tile_after = rule.ground_tile_after
+            if carry_tile_after == rule.carry_tile_before || carry_tile_after == TileKind BUCKET_EMPTY
+                carry_tile_after = TileKind NONE
+            if ground_tile_after == rule.ground_tile_before
+                ground_tile_after = TileKind NONE
+            var str_after = ""
+            if ground_tile_after != TileKind NONE && carry_tile_after !=  TileKind NONE
+                str_after = " + "
+            if ground_tile_after != TileKind NONE
+                str_after = readable_tile_name_for_craft(ground_tile_after) + str_after
+            if carry_tile_after != TileKind NONE
+                str_after = str_after + readable_tile_name_for_craft(carry_tile_after)
+
+            var str = str_after + " = " + str_before
+            push(pause_menu.options_str, str)
+
+
+    var prev_sel = pause_menu.idx_selected
+    var tried_to_move_selected = false
+    if dialog_up_pressed() && with_input
         pause_menu.idx_selected--
-    if dialog_down_pressed()
+        tried_to_move_selected = true
+    if dialog_down_pressed() && with_input
         pause_menu.idx_selected++
+        tried_to_move_selected = true
 
     pause_menu.idx_selected = clamp(pause_menu.idx_selected, 0, length(pause_menu.options_str)-1)
+    if tried_to_move_selected
+        if prev_sel == pause_menu.idx_selected
+            play_sound(SoundKind UI_BLOCKED, player.position)
+        else
+            play_sound(SoundKind UI_MOVE, player.position)
     
-    if dialog_back_pressed()
+    if dialog_back_pressed() && with_input
         pause_menu.idx_selected = 0
-    elif !dialog_accept_pressed()
+        play_sound(SoundKind UI_CLICK, player.position)
+
+    elif !(dialog_accept_pressed() && with_input)
         return
+
+    if pause_menu.kind != PauseMenuStateKind CRAFTBOOK
+        play_sound(SoundKind UI_CLICK, player.position)
 
     if pause_menu.kind == PauseMenuStateKind PAUSE
         if pause_menu.idx_selected == 0
             pause_menu = null
             return
         elif pause_menu.idx_selected == 1
-            pause_menu.kind = PauseMenuStateKind SAVE
+            pause_menu.kind = PauseMenuStateKind CRAFTBOOK
         elif pause_menu.idx_selected == 2
-            pause_menu.kind = PauseMenuStateKind LOAD
+            pause_menu.kind = PauseMenuStateKind RESTART
         elif pause_menu.idx_selected == 3
+            pause_menu.kind = PauseMenuStateKind SAVE
+        elif pause_menu.idx_selected == 4
+            pause_menu.kind = PauseMenuStateKind LOAD
+        elif pause_menu.idx_selected == 5
             pause_menu.kind = PauseMenuStateKind QUIT
         else
             assert(false)
@@ -2656,7 +2745,7 @@ def update_pause_menu()
     elif pause_menu.kind == PauseMenuStateKind QUIT
         if pause_menu.idx_selected == 0
             pause_menu.kind = pause_menu.is_death ? PauseMenuStateKind DEATH : PauseMenuStateKind PAUSE
-            pause_menu.idx_selected = pause_menu.is_death ? 2 : 3
+            pause_menu.idx_selected = pause_menu.is_death ? 2 : 5
         elif pause_menu.idx_selected == 1
             schedule_quit_game()
             pause_menu.idx_selected = 0
@@ -2664,7 +2753,7 @@ def update_pause_menu()
     elif pause_menu.kind == PauseMenuStateKind SAVE
         if pause_menu.idx_selected == 0
             pause_menu.kind = PauseMenuStateKind PAUSE
-            pause_menu.idx_selected = 1
+            pause_menu.idx_selected = 3
         else
             var slot = pause_menu.idx_selected
             save(slot)
@@ -2672,7 +2761,7 @@ def update_pause_menu()
     elif pause_menu.kind == PauseMenuStateKind LOAD
         if pause_menu.idx_selected == 0
             pause_menu.kind = pause_menu.is_death ? PauseMenuStateKind DEATH : PauseMenuStateKind PAUSE
-            pause_menu.idx_selected = pause_menu.is_death ? 1 : 2
+            pause_menu.idx_selected = pause_menu.is_death ? 1 : 4
         else
             var slot = pause_menu.idx_selected - 1
             var has = has_save(slot)
@@ -2693,8 +2782,8 @@ def update_pause_menu()
             assert(false)
     elif pause_menu.kind == PauseMenuStateKind RESTART
         if pause_menu.idx_selected == 0
-            pause_menu.idx_selected = 0
-            pause_menu.kind = PauseMenuStateKind DEATH
+            pause_menu.kind = pause_menu.is_death ? PauseMenuStateKind DEATH : PauseMenuStateKind PAUSE
+            pause_menu.idx_selected = pause_menu.is_death ? 0 : 2
         elif pause_menu.idx_selected == 1
             init_level_default()
             world_state.tutorial_state.state = TutorialStateEnum INITIAL
@@ -2705,6 +2794,13 @@ def update_pause_menu()
             world_state.tutorial_state.state = TutorialStateEnum NONE
             pause_menu = null
             return
+    elif pause_menu.kind == PauseMenuStateKind CRAFTBOOK
+        if pause_menu.idx_selected == 0
+            pause_menu.kind = PauseMenuStateKind PAUSE
+            pause_menu.idx_selected = 1
+            play_sound(SoundKind UI_CLICK, player.position)
+        else
+            pass//TODO need sound ?
 
 def will_be_freezing_without_fire(character : Character) : bool
     return calc_coldness_without_fire(character) > 0.5
@@ -2746,6 +2842,9 @@ let text_height = 21
 def ui_draw_tutorial_msg()
     ui_draw_simple_menu(*ui_tutorial)
 
+def is_immortal(character : Character?) : bool
+    return !is_tutorial_finished() && length(aiCharacters) > 0 && character == aiCharacters[0]
+
 [export]
 def act(_dt: float)
     var is_rapid_timescale = false
@@ -2774,7 +2873,9 @@ def act(_dt: float)
     //log("time_scale={time_scale}; dt = {dt}")
 
     if pause_menu != null
-        update_pause_menu()
+        update_pause_menu(true)
+        if pause_menu != null
+            update_pause_menu(false)
         return
 
     if is_dead(*player)
@@ -2782,10 +2883,13 @@ def act(_dt: float)
         pause_menu = new PauseMenuState()
         pause_menu.is_death = true
         pause_menu.kind = PauseMenuStateKind DEATH
+        update_pause_menu(false)
         return
 
     if get_key_down(VK_ESCAPE)
+        play_sound(SoundKind UI_CLICK, player.position)
         pause_menu = new PauseMenuState()
+        update_pause_menu(false)
         return
 
     update_tutorial(dt)
@@ -2803,6 +2907,7 @@ def act(_dt: float)
             items_count_cache[e]++
 
     update_rain_loop()
+    update_ambient_loop()
 
     update_env(dt)
 
@@ -2831,7 +2936,7 @@ def act(_dt: float)
 
         var new_character = new AiCharacter()
 
-        new_character.position = float2(random_float(seed) * float(map_size.x), random_float(seed) * float(map_size.y))
+        new_character.position = player.position + float2((random_float(seed)-0.5) * 2.0 * 5.0, (random_float(seed)-0.5) * 2.0 * 5.0)
         new_character.target_position = new_character.position
         var r = random_float(seed)
         if r > 0.66666666
@@ -2925,7 +3030,7 @@ def act(_dt: float)
         player.isRunning = false
 
     for ch in characters
-        if ch.health == 0.0
+        if ch.health == 0.0 && !is_immortal(ch)
             die(*ch)
             continue
 
@@ -3042,9 +3147,6 @@ def act(_dt: float)
                 continue
             if tile.kind == TileKind DECAL_SMALL
                 tile.kind = TileKind NONE
-            else
-                continue
-            grid_items->setTile(tile)
 
     world_state.tree_grow_timer += dt
     if world_state.tree_grow_timer > tree_grow_one_period
@@ -3571,9 +3673,9 @@ def calc_coldness(pos : float2) : float
 def get_pivot(kind : TileKind) : float2
     if kind == TileKind TREE_GREEN || kind == TileKind TREE_YELLOW || kind == TileKind TREE_RED
         return float2(0.5,1.0)
-    elif kind == TileKind HUMAN || kind == TileKind CHILD_A || kind == TileKind CHILD_B
+    elif kind == TileKind HUMAN || kind == TileKind CHILD_A || kind == TileKind CHILD_B || kind == TileKind HUMAN_CLOTH || kind == TileKind CHILD_A_CLOTH || kind == TileKind CHILD_B_CLOTH
         return float2(0.5,1.0)
-    elif kind == TileKind HUMAN_ON_HORSE ||  kind == TileKind HORSE || kind == TileKind SHEEP || kind == TileKind SHEEP_SHEARED
+    elif kind == TileKind HUMAN_ON_HORSE ||  kind == TileKind HORSE || kind == TileKind SHEEP || kind == TileKind SHEEP_SHEARED || kind == TileKind HUMAN_ON_HORSE_CLOTH
         return float2(0.7,1.0)
     else
         return float2(0.5,0.5)
@@ -3705,6 +3807,17 @@ def get_tile_pos_offset(kind : TileKind) : float2
 
 var items_count_cache : table<TileKind; int>
 
+def get_flag_color(kind : TileKind) : uint        
+    if kind == TileKind RED_FLAG
+        return 0xffff0000
+    elif kind == TileKind GREEN_FLAG
+        return 0xff00ff00
+    elif kind == TileKind BLUE_FLAG
+        return 0xff0000ff
+    else
+        assert(false)
+        return 0xffffffff
+
 def draw_tile(tile : TileFloat)
     var pos = tile.position
     pos.y += tile.z * tileZToY + tile.offsetY
@@ -3721,14 +3834,7 @@ def draw_tile(tile : TileFloat)
         color = lerp_colors_fix(color, 0xff000000, 0.2)
     
     if is_flag(kind)
-        if kind == TileKind RED_FLAG
-            color = 0xffff0000
-        elif kind == TileKind GREEN_FLAG
-            color = 0xff00ff00
-        elif kind == TileKind BLUE_FLAG
-            color = 0xff0000ff
-        else
-            assert(false)
+        color = get_flag_color(kind)
 
     if kind == TileKind WATER
         pos.y -= tile.z * tileZToY + 0.2
@@ -3980,6 +4086,8 @@ def draw_character_stats(character : Character?; _pos : float2; invertX : bool) 
 
 def draw_tile_kind_info(kind : TileKind; _pos : float2)
     var color = 0xffffffff
+    if is_flag(kind)
+        color = get_flag_color(kind)
     var pos = _pos 
     pos.x = float(get_screen_width()) / ui_scale - pos.x
     pos -= get_tile_pos_offset(kind) * float2(tileSizeX, tileSizeY) * 0.5
@@ -4014,8 +4122,10 @@ def draw_ui()
 
     let alt_action_result = _alt_action(*player, invalid_tile_pos, false)
     if alt_action_result.is_valid
-        if alt_action_result.target_char != null
-            var npc = alt_action_result.target_char
+        var npc = alt_action_result.target_char
+        if current_dialog != null
+            npc = current_dialog.character
+        if npc != null
             draw_character_stats(npc, float2(10.0,0.0), true)
             if npc.is_name_known
                 text_out(get_screen_width() - int(get_text_size(npc.name).x) - 10, y, npc.name, 0xffffffff)
@@ -4147,14 +4257,20 @@ def draw_ui()
 
 var current_dialog : DialogStateGeneric?
 
+
 enum DialogFirstAction
     NONE
     WHAT_ARE_YOU_DOING
-    BRING
+    PUT
     MAKE
     CUT
     PLOW
     PLANT
+
+def dialog_first_action_readable(action : DialogFirstAction) : string
+    if action == DialogFirstAction WHAT_ARE_YOU_DOING
+        return "WHAT ARE YOU DOING?"
+    return replace("{action}", "_", " ")
 
 class DialogStateGeneric
     character : AiCharacter?
@@ -4183,8 +4299,14 @@ class TutorialDialogState : DialogStateGeneric
         ui_message = character_lines[current_line_idx]
         push(ui_options, player_lines[current_line_idx])
 
+        if dialog_down_pressed() || dialog_up_pressed()
+            play_sound(SoundKind UI_BLOCKED, player.position)
+
+
         if !dialog_accept_pressed()
             return false
+
+        play_sound(SoundKind UI_CLICK, player.position)
 
         current_line_idx = min(current_line_idx + 1, length(character_lines))
         
@@ -4248,7 +4370,7 @@ def ai_command_to_str(command : AiCommand)
 
 def ai_command_from_dialog(dialog : DialogState) : AiCommand
     //TODO more generic and less manual way
-    if dialog.first_action == DialogFirstAction BRING
+    if dialog.first_action == DialogFirstAction PUT
         return ai_command_bring_a_to_b(dialog.first_action_tile_kind, dialog.second_action_tile_kind)
     elif dialog.first_action == DialogFirstAction CUT
         return ai_command_do_default_action_on_a(dialog.first_action_tile_kind)
@@ -4276,6 +4398,19 @@ def ai_command_from_dialog(dialog : DialogState) : AiCommand
     var command : AiCommand
     return command
 
+def readable_tile_name_for_craft(kind : TileKind) : string
+    if kind == TileKind DECAL_PREPARED_SOIL
+        return "SOIL"
+    elif kind == TileKind DECAL_PREPARED_AND_WATERED_SOIL
+        return "WATERED SOIL"
+    elif kind == TileKind CAMPFIRE_NO_WOOD
+        return "EMPTY CAMPFIRE"
+    elif kind == TileKind CAMPFIRE
+        return "STARTED CAMPFIRE"
+    elif kind == TileKind BREAD_6
+        return "BREAD"
+    return readable_tile_name(kind)
+
 def readable_tile_name(kind : TileKind) : string
     var str = ""
     if kind == TileKind WHEAT_COLLECTED_6
@@ -4286,6 +4421,14 @@ def readable_tile_name(kind : TileKind) : string
         str = "WHEAT"
     elif kind == TileKind WHEAT_MEDIUM || kind == TileKind WHEAT_SMALL
         str = "YOUNG WHEAT"
+    elif kind == TileKind CAMPFIRE || kind == TileKind CAMPFIRE_NO_FIRE || kind == TileKind CAMPFIRE_NO_WOOD
+        str = "CAMPFIRE"
+    elif kind == TileKind BUCKET_EMPTY
+        return "BUCKET"
+    elif kind == TileKind STOVE
+        return "EMPTY STOVE"
+    elif kind == TileKind STOVE_WITH_COAL_FIRED
+        return "TURNED ON STOVE"
     else
         str = replace("{kind}", "_", " ")
     return str;
@@ -4300,12 +4443,12 @@ def update_dialog(var dialog_state : DialogState) : bool
     var bringable_items : array<TileKind>
     push(bringable_items, TileKind WHEAT_STACK)
     for e in each_enum(type<TileKind>)
-        if is_big_item(e) && !is_collected_wheat(e) && !is_flag(e)
+        if is_big_item(e) && !is_collected_wheat(e) && !is_flag(e) && e != TileKind CAMPFIRE && e != TileKind CAMPFIRE_NO_WOOD && e != TileKind CAMPFIRE_NO_FIRE && e != TileKind STOVE && e != TileKind STOVE_WITH_COAL && e != TileKind STOVE_WITH_COAL_FIRED
             push(bringable_items, e)
 
     var bringtoable_flags : array<TileKind>
     for e in each_enum(type<TileKind>)
-        if is_flag(e)
+        if is_flag(e) && items_count_cache[e] > 0
             push(bringtoable_flags, e)
     
     var makeable_items : array<TileKind>
@@ -4324,11 +4467,11 @@ def update_dialog(var dialog_state : DialogState) : bool
     var plowable_items : array<TileKind>
     push(plowable_items, TileKind SOIL)
 
-    var has_second = dialog_state.first_action == DialogFirstAction BRING
+    var has_second = dialog_state.first_action == DialogFirstAction PUT
     var has_first = dialog_state.first_action != DialogFirstAction WHAT_ARE_YOU_DOING
 
     var first_tile_source_array : array<TileKind>
-    if dialog_state.first_action == DialogFirstAction BRING
+    if dialog_state.first_action == DialogFirstAction PUT
         first_tile_source_array <- bringable_items
     elif dialog_state.first_action == DialogFirstAction CUT
         first_tile_source_array <- cutable_items
@@ -4341,14 +4484,14 @@ def update_dialog(var dialog_state : DialogState) : bool
     
     push(dialog_state.ui_options, "<BACK>")
     if !dialog_state.had_greeting
-        push(dialog_state.ui_options, "Hi, {dialog_state.character.name}")
+        push(dialog_state.ui_options, "HI, {to_upper(dialog_state.character.name)}")
     elif dialog_state.first_action == DialogFirstAction NONE
         for e in each_enum(type<DialogFirstAction>)
             if e == DialogFirstAction NONE
                 continue
-            push(dialog_state.ui_options, "{e}")
-            if dialog_state.tutorial_make_campfire_only && e != DialogFirstAction BRING
-                push(dialog_state.ui_blocked_options, "{e}")
+            push(dialog_state.ui_options, dialog_first_action_readable(e))
+            if dialog_state.tutorial_make_campfire_only && e != DialogFirstAction PUT
+                push(dialog_state.ui_blocked_options, dialog_first_action_readable(e))
     elif dialog_state.first_action_tile_kind == TileKind NONE && has_first
         for e in first_tile_source_array
             push(dialog_state.ui_options, "{readable_tile_name(e)}")
@@ -4356,7 +4499,7 @@ def update_dialog(var dialog_state : DialogState) : bool
                 push(dialog_state.ui_blocked_options, "{readable_tile_name(e)}")
 
     elif !dialog_state.to_pressed && has_second && has_first
-        push(dialog_state.ui_options, "TO")
+        push(dialog_state.ui_options, "ON")
     elif dialog_state.second_action_tile_kind == TileKind NONE && has_second && has_first
         for e in each_enum(type<TileKind>)
             if can_combine(dialog_state.first_action_tile_kind, e)
@@ -4384,7 +4527,7 @@ def update_dialog(var dialog_state : DialogState) : bool
     if dialog_state.first_action_tile_kind != TileKind NONE
         dialog_state.ui_message += " {dialog_state.first_action_tile_kind}"
     if dialog_state.to_pressed
-        dialog_state.ui_message += " TO"
+        dialog_state.ui_message += " ON"
     if dialog_state.second_action_tile_kind != TileKind NONE
         dialog_state.ui_message += " {dialog_state.second_action_tile_kind}"
 
@@ -4407,19 +4550,28 @@ def update_dialog(var dialog_state : DialogState) : bool
         assert(false)
         dialog_state.ui_message = "???"
     
+    var tried_to_move = false
+    var prev_opt = dialog_state.i_current_option
     if dialog_up_pressed()
         dialog_state.i_current_option -= 1
+        tried_to_move = true
     if dialog_down_pressed()
         dialog_state.i_current_option += 1
+        tried_to_move = true
     dialog_state.i_current_option = clamp(dialog_state.i_current_option, 0, length(dialog_state.ui_options)-1)
-
+    if tried_to_move
+        if prev_opt != dialog_state.i_current_option
+            play_sound(SoundKind UI_MOVE, player.position)
+        else
+            play_sound(SoundKind UI_BLOCKED, player.position)
 
     if !dialog_accept_pressed()
         return false
     
     if find_index(dialog_state.ui_blocked_options, dialog_state.ui_options[dialog_state.i_current_option]) != -1
-        //TODO bad beep beep sound
+        play_sound(SoundKind UI_BLOCKED, player.position)
         return false
+    play_sound(SoundKind UI_CLICK, player.position)
 
     if !dialog_state.had_greeting
         dialog_state.character.is_name_known = true

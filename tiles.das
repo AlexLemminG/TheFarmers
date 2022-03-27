@@ -216,3 +216,6 @@ enum SoundKind
     PUT_WOOD_TO_STOVE
     SHEAR_SHEEP
     EAT_GRASS
+    UI_BLOCKED
+    UI_MOVE
+    UI_CLICK
