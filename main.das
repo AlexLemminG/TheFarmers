@@ -2813,7 +2813,7 @@ def update_pause_menu(with_input : bool)
             play_sound(SoundKind UI_MOVE, player.position)
     
     if dialog_back_pressed() && with_input
-        if pause_menu.kind == PauseMenuStateKind MAIN_MENU
+        if pause_menu.kind == PauseMenuStateKind MAIN_MENU || pause_menu.kind == PauseMenuStateKind DEATH
             play_sound(SoundKind UI_MOVE, player.position)
             pause_menu.idx_selected = 2
             return
@@ -3101,7 +3101,6 @@ def act(_dt: float)
         world_state.good_health_and_no_hunger_duration = max(0.0, world_state.good_health_and_no_hunger_duration - dt * good_health_and_no_hunger_to_new_human_decrease_speed)
     if world_state.good_health_and_no_hunger_duration >= good_health_and_no_hunger_to_new_human_duration && is_tutorial_finished()
         world_state.good_health_and_no_hunger_duration = 0.0
-
         spawn_new_villager()
 
     var player_can_move = !is_dead(*player)
@@ -3125,8 +3124,6 @@ def act(_dt: float)
             player.velocity = float2(0.0,0.0)
         else
             set_character_animation(*player, AnimKind NONE)
-
-        
 
     if player_can_move
         if get_key(VK_W)
@@ -3159,18 +3156,18 @@ def act(_dt: float)
             camera.scale = dbg_camera_scale
         if get_key_down(VK_F3)
             log("{get_int_pos(player.position)}")
+        if get_key_down(VK_F8)
+            heap_report()
+        if get_key_down(VK_F9)
+            if !is_dead(*player)
+                die(*player)
+        if get_key_down(VK_F10)
+            spawn_new_villager()
     if get_key_down(VK_F11) && dbg_mode_camera
         dbg_fix_camera = !dbg_fix_camera
     if get_key_down(VK_F12) && dbg_mode_camera
         dbg_fix_camera_pos = camera.position
         
-    if get_key_down(VK_F8) && dbg_mode
-        heap_report()
-    if get_key_down(VK_F9) && dbg_mode
-        if !is_dead(*player)
-            die(*player)
-    if get_key_down(VK_F10) && dbg_mode
-        spawn_new_villager()
 
     player.velocity = clampLength(player.velocity, 1.0) * GetMaxSpeed(*player)
     if get_key(VK_LSHIFT) && dbg_mode
@@ -3184,7 +3181,6 @@ def act(_dt: float)
         if ch.health == 0.0 && !is_immortal(ch)
             die(*ch)
             continue
-
 
         if ch.kind == TileKind SHEEP_SHEARED
             if world_state.day_float > ch.saved_float + gamedays_to_grow_wool
@@ -3224,18 +3220,18 @@ def act(_dt: float)
             ch.mirrorX = false
         elif ch.velocity.x > 0.1
             ch.mirrorX = true
+        var phys_steps_count = ch.kind == TileKind HUMAN_ON_HORSE ? 4 : 1
+        for i in range(phys_steps_count)
+            for x in range(int(ch.position.x), int(ch.position.x+2.0))
+                for y in range(int(ch.position.y), int(ch.position.y+2.0))
+                    var tileToCollide = grid_items->getTile(float2(float(x), float(y)))
+                    var tileToCollide2 = grid_ground->getTile(float2(float(x), float(y)))
+                    ch.position.x = clamp(ch.position.x, -0.5,map_size_f.x - 0.6)
+                    ch.position.y = clamp(ch.position.y, -0.5,map_size_f.y - 0.6)
+                    processCollision(ch.position, tileToCollide)
+                    processCollision(ch.position, tileToCollide2)
 
-        for x in range(int(ch.position.x), int(ch.position.x+2.0))
-            for y in range(int(ch.position.y), int(ch.position.y+2.0))
-                var tileToCollide = grid_items->getTile(float2(float(x), float(y)))
-                var tileToCollide2 = grid_ground->getTile(float2(float(x), float(y)))
-                ch.position.x = clamp(ch.position.x, -0.5,map_size_f.x - 0.6)
-                ch.position.y = clamp(ch.position.y, -0.5,map_size_f.y - 0.6)
-                processCollision(ch.position, tileToCollide)
-                processCollision(ch.position, tileToCollide2)
-
-
-    camera.position = lerp(camera.position, player.position, saturate(dt * 3.0)) 
+    camera.position = lerp(camera.position, player.position, saturate(dt * 3.0))
     if dbg_fix_camera
         camera.position = dbg_fix_camera_pos
     camera->updateOffsetAndScale()

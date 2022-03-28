@@ -11,7 +11,7 @@ robocopy sounds "build\%game_data_name%\sounds" /E
 robocopy .\ "build" assets_used.txt
 robocopy .\ "build\%game_data_name%" tiles.das
 robocopy .\ "build\%game_data_name%" tiles.png
-robocopy .\ "build\%game_data_name%" box_main.das
+robocopy .\ "build\%game_data_name%" main.das
 robocopy .\ "build" run.bat
 robocopy .\..\..\ "build" dasbox.exe
 
