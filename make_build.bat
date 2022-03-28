@@ -8,6 +8,7 @@ mkdir "build\%game_data_name%\sounds"
 del /s /q %archive_name%
 
 robocopy sounds "build\%game_data_name%\sounds" /E
+robocopy .\ "build" assets_used.txt
 robocopy .\ "build\%game_data_name%" tiles.das
 robocopy .\ "build\%game_data_name%" tiles.png
 robocopy .\ "build\%game_data_name%" box_main.das

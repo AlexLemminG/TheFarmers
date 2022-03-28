@@ -5,11 +5,11 @@ require fio
 //require json
 require daslib/json_boost
 
-options debugger            // uncomment for debug in VS Code
-require daslib/debug        // uncomment for debug in VS Code
+//options debugger            // uncomment for debug in VS Code
+//require daslib/debug        // uncomment for debug in VS Code
 
 var dbg_mode : bool = false
-var dbg_mode_camera : bool = true
+var dbg_mode_camera : bool = false
 var dbg_spawn_items : bool = false
 var draw_grid = false
 var dbg_time_scale = 1.0
@@ -569,6 +569,8 @@ def generate_default_ground_grid(width : int; height : int) : Grid?
             tile.kind = TileKind SOIL  
             tile.z = float(random_int(seed) % int(tileFloorHeightZ) / 3) / tileFloorHeightZ
             var tint = lerp(random_float(seed), 1.0, 0.8)
+            //tint = 1.0
+            tile.z = 0.0
             tile.color = make_color(tint)
 
             push_clone(grid.tiles, tile)
@@ -4762,7 +4764,7 @@ def draw_rain()
     var size = float2(1.0,1.0)
     size *= float2(tileSizeX,tileSizeY) * camera.scale
     var texture_rect = get_tile_texture_rect(TileKind RAIN_EFFECT)
-    var countX = 24
+    var countX = 26
     var countY = 12
     var offset = get_realtime_since_world_started() * float2(0.0, 1.0) * 120.0 * 5.0
 
@@ -4817,8 +4819,8 @@ def ui_draw_dialog(var dialog_state : DialogStateGeneric)
 
     pass
 
-var camFSizeX = 36.0
-var camFSizeY = 30.0
+var camFSizeX = 42.0
+var camFSizeY = 32.0
 
 def get_min_culled() : int2
     var p = int2(floori(camera.position.x - camFSizeX / camera.scale), floori(camera.position.y - camFSizeY / camera.scale))
