@@ -83,6 +83,10 @@ var empty_sound : SoundHandle
 var all_human_names : array<string>
 var chest_items : array<TileKind>
 
+def _assert(val : bool)
+    if dbg_mode
+        assert(val)
+
 enum AiCommandKind
     NONE
     BRING_A_TILE_TO_B_TILE
@@ -125,7 +129,7 @@ struct TutorialState
     player_plowed_ground : bool
 
 def update_tutorial_msg()
-    assert(ui_tutorial != null)
+    _assert(ui_tutorial != null)
     if dialog_accept_pressed()
         ui_tutorial = null
 
@@ -171,8 +175,8 @@ def update_tutorial(dt : float)
         push(lines, "WHAT A GREAT PLACE")
         push(player_lines, "LET'S MAKE A SETTLEMENT HERE")
         
-        push(lines, "GREAT IDEA! I'LL BRING SOME WOOD FOR CAMPFIRE")
-        push(player_lines, "I'LL GET THE FLINT STONE FROM CHEST THEN")
+        push(lines, "GREAT IDEA! I'LL BRING SOME WOOD FOR A CAMPFIRE")
+        push(player_lines, "I'LL GET A FLINT STONE FROM THE CHEST THEN")
 
         make_tutorial_dialog(npc, lines, player_lines)
         return
@@ -184,7 +188,7 @@ def update_tutorial(dt : float)
             //WARN player may think that all ai's actions are executed only once
             //TODO bugfix ai can accidentaly drop near flag and ignore do_once
             npc.command.do_once = true
-            show_tutorial_msg("GET FLINT STONE FROM CHEST")
+            show_tutorial_msg("GET A FLINT STONE FROM THE CHEST")
         return
 
     if current_state.state == TutorialStateEnum WAITING_FOR_MSG_BOX_TO_CLOSE_1
@@ -235,11 +239,8 @@ def update_tutorial(dt : float)
             var lines : array<string>
             var player_lines : array<string>
 
-            push(lines, "THE FIREPLACE IS READY FOR SOME FIRE")
+            push(lines, "THE CAMPFIRE IS READY FOR SOME FIRE")
             push(player_lines, "I'LL USE MY FLINT STONE THEN")
-            
-            push(lines, "BE A FIRESTARTER!!!")
-            push(player_lines, "<CONTINUE>")
 
             make_tutorial_dialog(npc, lines, player_lines)
             world_state.tutorial_state.state = TutorialStateEnum WAITING_FOR_DIALOG_FINISH_2
@@ -268,7 +269,7 @@ def update_tutorial(dt : float)
             var lines : array<string>
             var player_lines : array<string>
 
-            push(lines, "NOW WE HAVE A PLACE TO GATHER IN EVENING")
+            push(lines, "NOW WE HAVE A PLACE TO GATHER IN THE EVENING")
             push(player_lines, "YEAH IT'S SO WARM AROUND IT")
             
             push(lines, "NOW IT'S TIME TO PLANT SOME WHEAT")
@@ -307,11 +308,11 @@ def update_tutorial(dt : float)
             var lines : array<string>
             var player_lines : array<string>
 
-            push(lines, "DID YOU PLANT WHEAT?")
+            push(lines, "DID YOU PLANT THE WHEAT?")
             push(player_lines, "YES, IT SHOULD BE FULLY GROWN BY TOMORROW")
             
             push(lines, "CAN'T WAIT TO MAKE SOME BREAD OUT OF IT")
-            push(player_lines, "I NEED TO CHECK MY CRAFTBOOK FOR RECIPE")
+            push(player_lines, "I NEED TO CHECK MY CRAFTBOOK FOR THE RECIPE")
 
             make_tutorial_dialog(npc, lines, player_lines)
             world_state.tutorial_state.state = TutorialStateEnum WAITING_FOR_DIALOG_FINISH_4
@@ -320,8 +321,8 @@ def update_tutorial(dt : float)
     if current_state.state == TutorialStateEnum WAITING_FOR_DIALOG_FINISH_4
         if current_dialog == null
             var msgs : array<string>
-            push(msgs, "          MAKE BREAD")
-            push(msgs, "(CHECK CRAFTBOOK IN PAUSE MENU)")
+            push(msgs, "            MAKE A BREAD")
+            push(msgs, "(CHECK THE CRAFTBOOK IN THE PAUSE MENU)")
             show_tutorial_msgs(msgs)
             world_state.tutorial_state.state = TutorialStateEnum WAITING_FOR_MSG_BOX_TO_CLOSE_4
         return
@@ -334,15 +335,16 @@ def update_tutorial(dt : float)
         var bread_count = items_count_cache[TileKind BREAD]
         if bread_count != 0
             var msgs : array<string>
-            push(msgs, "THIS IS THE END OF TUTORIAL")
+            push(msgs, "THIS IS THE END OF THE TUTORIAL")
             push(msgs, " ")
             push(msgs, "YOUR GOAL NOW IS TO")
-            push(msgs, "GROW SETTLEMENT AS BIG AS POSSIBLE")
+            push(msgs, "GROW THE SETTLEMENT AS BIG AS POSSIBLE")
             push(msgs, " ")
-            push(msgs, "NEW PEOPLE WILL COME TO VILLAGE")
+            push(msgs, "NEW PEOPLE WILL COME TO THE VILLAGE")
             push(msgs, "IF EVERYONE IS HEALTHY AND WELL FED")
             show_tutorial_msgs(msgs)
 
+            world_state.good_health_and_no_hunger_duration = 0.0
             spawn_new_villager()
             world_state.tutorial_state.state = TutorialStateEnum FINISHED
         return
@@ -570,7 +572,7 @@ def generate_default_ground_grid(width : int; height : int) : Grid?
             tile.z = float(random_int(seed) % int(tileFloorHeightZ) / 3) / tileFloorHeightZ
             var tint = lerp(random_float(seed), 1.0, 0.8)
             //tint = 1.0
-            tile.z = 0.0
+            //tile.z = 0.0
             tile.color = make_color(tint)
 
             push_clone(grid.tiles, tile)
@@ -677,7 +679,7 @@ def has_save(slot : int) : bool
     return has_file(get_save_slot_file(slot))
 
 def save(slot : int)
-    assert(-1 <= slot && slot <= save_slots_count)
+    _assert(-1 <= slot && slot <= save_slots_count)
     var file = fopen(get_save_slot_file(slot), "w")
     if file == null
         return
@@ -857,7 +859,7 @@ struct AiCommand
     do_once : bool
 
 def is_human(kind : TileKind) : bool
-    return kind == TileKind HUMAN || kind == TileKind CHILD_A || kind == TileKind CHILD_B
+    return kind == TileKind HUMAN || kind == TileKind CHILD_A || kind == TileKind CHILD_B || kind == TileKind HUMAN_ON_HORSE
 
 def get_current_hour_float() : float
     var time_float = world_state.day_float - float(trunci(world_state.day_float))
@@ -1115,7 +1117,7 @@ class AiCharacter : Character
             else
                 var tile = grid_items->getTileInt(nearest_tile_b_pos)
                 if !can_craft(self, tile)
-                    assert(false)
+                    _assert(false)
                     return false
                 craft(self, tile)
                 if cmd.do_once
@@ -1158,7 +1160,7 @@ class AiCharacter : Character
             else
                 dbg_ai("failed to do alt_action with {cmd.a_tile} at {nearest_tile_a_pos}")
                 log("failed to do alt_action with {cmd.a_tile} at {nearest_tile_a_pos}")
-                //assert(false)
+                //_assert(false)
                 return false
             if cmd.do_once
                 //TODO less hacky
@@ -1255,7 +1257,7 @@ class AiCharacter : Character
                     dbg_ai("doing alt_action with {grid_items->getTileInt(nearest_eat_pos).kind} at {nearest_eat_pos}")
                 else
                     dbg_ai("failed to do alt_action with {grid_items->getTileInt(nearest_eat_pos).kind} at {nearest_eat_pos}")
-                    assert(false)
+                    _assert(false)
                     return false
                 return true     
             else
@@ -1511,6 +1513,22 @@ def init_level_default()
             decal.kind = TileKind NONE
             decal.color = tile.color
             grid_ground_decals->setTile(decal)
+        
+        //HACK deleting wheat and berries to remove temptation to cross the river early on
+        for y in range(y_max+1, map_size.y)
+            var item = grid_items->getTileInt(int2(x,y))
+            if item.kind == TileKind BUSH_WITH_BERRIES || item.kind == TileKind WHEAT_FULL
+                item.kind = TileKind NONE
+                grid_items->setTile(item)
+
+                var decal = grid_ground_decals->getTileInt(int2(x,y))
+                decal.kind = TileKind NONE
+                grid_ground_decals->setTile(decal)
+
+                var ground = grid_ground->getTileInt(int2(x,y))
+                ground.kind = TileKind GRASS
+                grid_ground->setTile(ground)
+
 
     player = new Player()
     player.position = float2(float(grid_ground.width), float(grid_ground.height )) / 2.0
@@ -1537,6 +1555,8 @@ def init_level_default()
 
         npc.position = player.position
         npc.position += float2((random_float(seed) - 0.5) * 2.0 * 1.0, (random_float(seed) - 0.5) * 2.0 * 1.0)
+        if i == 0
+            npc.position = player.position + float2(1.0, 0.0)
         npc.target_position = npc.position
         var r = random_float(seed)
         if r > 0.666
@@ -1611,6 +1631,12 @@ def init_level_default()
         push(itemsList, TileKind WOOL)
         push(itemsList, TileKind WOOL)
         push(itemsList, TileKind WOOL)
+        push(itemsList, TileKind BREAD_1)
+        push(itemsList, TileKind BREAD_2)
+        push(itemsList, TileKind BREAD_3)
+        push(itemsList, TileKind BREAD_4)
+        push(itemsList, TileKind BREAD_5)
+        push(itemsList, TileKind BREAD_6)
 
         for i in range(length(itemsList))
             var tile = grid_items->getTileInt(int2(i - length(itemsList) / 2 + grid_ground.width / 2, 1 + grid_ground.height / 2))
@@ -1699,9 +1725,10 @@ def initialize
     push(all_human_names, "Astrid"              )
 
     push(chest_items, TileKind FLINT_STONE)
-    push(chest_items, TileKind BUCKET_EMPTY)
     push(chest_items, TileKind SHEEP_SHEARS)
     push(chest_items, TileKind RED_FLAG)
+    push(chest_items, TileKind FLINT_STONE)
+    push(chest_items, TileKind BLUE_FLAG)
 
     register_all_craft_rules()
 
@@ -1714,7 +1741,7 @@ def initialize
         fwrite(file_global_save, "\{\}")
         fclose(file_global_save)
     else
-        assert(false)
+        _assert(false)
 
     act(0.001)
     pause_menu = new PauseMenuState()
@@ -1857,16 +1884,24 @@ def get_wheat_from_count(a: int) : TileKind
         return TileKind WHEAT_COLLECTED_5
     if a == 6
         return TileKind WHEAT_COLLECTED_6
-    assert(false)
+    _assert(false)
     return TileKind NONE
 
 def add_wheat(a : TileKind; b : TileKind) : TileKind
     var s = get_wheat_count(a) + get_wheat_count(b)
     return get_wheat_from_count(min(s, 6))
 
+def add_bread(a : TileKind; b : TileKind) : TileKind
+    var s = get_bread_count(a) + get_bread_count(b)
+    return get_bread_from_count(min(s, 6))
+
 def add_wheat_reminder(a : TileKind; b : TileKind) : TileKind
     var s = get_wheat_count(a) + get_wheat_count(b)
     return get_wheat_from_count(s - min(s, 6))
+
+def add_bread_reminder(a : TileKind; b : TileKind) : TileKind
+    var s = get_bread_count(a) + get_bread_count(b)
+    return get_bread_from_count(s - min(s, 6))
 
 def is_collected_wheat(kind : TileKind) : bool
     return int(kind) >= int(TileKind WHEAT_COLLECTED_1) && int(kind) <= int(TileKind WHEAT_COLLECTED_6)
@@ -1886,6 +1921,9 @@ def pick(var character : Character; var tile : Tile)
             if is_collected_wheat(kind) && is_collected_wheat(character.carry_item)
                 tile.kind = add_wheat_reminder(kind, character.carry_item)
                 character.carry_item = add_wheat(kind, character.carry_item)
+            elif is_bread(kind) && is_bread(character.carry_item)
+                tile.kind = add_bread_reminder(kind, character.carry_item)
+                character.carry_item = add_bread(kind, character.carry_item)
             else
                 tile.kind = character.carry_item
                 drop_carry_item(character, tile.position)
@@ -1894,7 +1932,7 @@ def pick(var character : Character; var tile : Tile)
             character.carry_item = kind
             tile.kind = TileKind NONE
     else
-        assert(false)
+        _assert(false)
         tile.anim.kind = AnimKind PICK
         tile.anim.t = 0.0
         tile.anim.stopT = 0.5
@@ -1903,14 +1941,14 @@ def pick(var character : Character; var tile : Tile)
     grid_items->setTile(tile)
 
 def get_bread_count(kind : TileKind) : int
-    assert(is_bread(kind))
+    _assert(is_bread(kind))
     return int(kind) - int(TileKind BREAD_1) + 1
 
 def is_bread(kind : TileKind) : bool
     return int(kind) >= int(TileKind BREAD_1) && int(kind) <= int(TileKind BREAD_6)
 
 def is_big_item(kind : TileKind) : bool
-    if kind == TileKind WOOD || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY || is_collected_wheat(kind) || kind == TileKind COAL || is_flag(kind)
+    if kind == TileKind WOOD || kind == TileKind FLINT_STONE || is_collected_wheat(kind) || kind == TileKind COAL || is_flag(kind)
         return true
     if kind == TileKind BED || kind == TileKind SHEEP_SHEARS || kind == TileKind WOOL || kind == TileKind STOVE || kind == TileKind STOVE_WITH_COAL || kind == TileKind STONE || kind == TileKind FLOUR
         return true
@@ -1921,7 +1959,7 @@ def is_big_item(kind : TileKind) : bool
     return false
 
 def is_pickable(kind : TileKind) : bool
-    if kind == TileKind WOOD || kind == TileKind FLINT_STONE || kind == TileKind BUCKET_WITH_WATER || kind == TileKind BUCKET_EMPTY || is_collected_wheat(kind) || kind == TileKind COAL || is_flag(kind)
+    if kind == TileKind WOOD || kind == TileKind FLINT_STONE || is_collected_wheat(kind) || kind == TileKind COAL || is_flag(kind)
         return true
     if kind == TileKind BED || kind == TileKind SHEEP_SHEARS || kind == TileKind WOOL || kind == TileKind STOVE || kind == TileKind STOVE_WITH_COAL || kind == TileKind STONE || kind == TileKind FLOUR
         return true
@@ -2009,32 +2047,32 @@ def _craft(var character : Character; _itemTile : Tile; exec : bool) : bool
             if itemTile.saved_float >= 3.0
                 kind = TileKind STOVE
         result = true
-    elif kind == TileKind CAMPFIRE && character.carry_item == TileKind BUCKET_WITH_WATER
-        if exec
-            play_sound(SoundKind DROP_WATER, character_pos)
-            play_sound(SoundKind FIRE_PUT_OUT, character_pos)
-            kind = TileKind CAMPFIRE_NO_WOOD
-            character.carry_item = TileKind BUCKET_EMPTY
-        result = true
-    elif kind == TileKind STOVE_WITH_COAL_FIRED && character.carry_item == TileKind BUCKET_WITH_WATER
-        if exec
-            play_sound(SoundKind DROP_WATER, character_pos)
-            play_sound(SoundKind FIRE_PUT_OUT, character_pos)
-            kind = TileKind STOVE_WITH_COAL
-            character.carry_item = TileKind BUCKET_EMPTY
-        result = true
-    elif groundDecalTile.kind == TileKind DECAL_PREPARED_SOIL && character.carry_item == TileKind BUCKET_WITH_WATER
-        if exec
-            play_sound(SoundKind DROP_WATER, character_pos)
-            groundDecalTile.kind = TileKind DECAL_PREPARED_AND_WATERED_SOIL
-            grid_ground_decals->setTile(groundDecalTile)
-            character.carry_item = TileKind BUCKET_EMPTY
-        result = true
-    elif groundKind == TileKind WATER && character.carry_item == TileKind BUCKET_EMPTY
-        if exec
-            play_sound(SoundKind PICK_WATER, character_pos)
-            character.carry_item = TileKind BUCKET_WITH_WATER
-        result = true
+    // elif kind == TileKind CAMPFIRE && character.carry_item == TileKind BUCKET_WITH_WATER
+    //     if exec
+    //         play_sound(SoundKind DROP_WATER, character_pos)
+    //         play_sound(SoundKind FIRE_PUT_OUT, character_pos)
+    //         kind = TileKind CAMPFIRE_NO_WOOD
+    //         character.carry_item = TileKind BUCKET_EMPTY
+    //     result = true
+    // elif kind == TileKind STOVE_WITH_COAL_FIRED && character.carry_item == TileKind BUCKET_WITH_WATER
+    //     if exec
+    //         play_sound(SoundKind DROP_WATER, character_pos)
+    //         play_sound(SoundKind FIRE_PUT_OUT, character_pos)
+    //         kind = TileKind STOVE_WITH_COAL
+    //         character.carry_item = TileKind BUCKET_EMPTY
+    //     result = true
+    // elif groundDecalTile.kind == TileKind DECAL_PREPARED_SOIL && character.carry_item == TileKind BUCKET_WITH_WATER
+    //     if exec
+    //         play_sound(SoundKind DROP_WATER, character_pos)
+    //         groundDecalTile.kind = TileKind DECAL_PREPARED_AND_WATERED_SOIL
+    //         grid_ground_decals->setTile(groundDecalTile)
+    //         character.carry_item = TileKind BUCKET_EMPTY
+    //     result = true
+    // elif groundKind == TileKind WATER && character.carry_item == TileKind BUCKET_EMPTY
+    //     if exec
+    //         play_sound(SoundKind PICK_WATER, character_pos)
+    //         character.carry_item = TileKind BUCKET_WITH_WATER
+    //     result = true
     elif kind == TileKind NONE && groundKind == TileKind WATER && character.carry_item == TileKind WOOD
         if exec
             play_sound(SoundKind GENERIC_ACTION, character_pos)
@@ -2045,6 +2083,17 @@ def _craft(var character : Character; _itemTile : Tile; exec : bool) : bool
     elif is_collected_wheat(kind) && is_collected_wheat(character.carry_item)
         var sum = add_wheat(kind, character.carry_item)
         var reminder = add_wheat_reminder(kind, character.carry_item)
+        if sum == character.carry_item
+            result = false
+        else
+            result = true
+            if exec
+                play_sound(get_pick_sound(kind), character_pos)
+                character.carry_item = sum
+                kind = reminder
+    elif is_bread(kind) && is_bread(character.carry_item)
+        var sum = add_bread(kind, character.carry_item)
+        var reminder = add_bread_reminder(kind, character.carry_item)
         if sum == character.carry_item
             result = false
         else
@@ -2120,7 +2169,7 @@ def register_craft_rule_not_in_craftbook(ground_tile_before : TileKind; carry_ti
     register_craft_rule(ground_tile_before, carry_tile_before, ground_tile_after, carry_tile_after, sound, false, false)
 
 def register_craft_rule(ground_tile_before : TileKind; carry_tile_before : TileKind; ground_tile_after : TileKind; carry_tile_after : TileKind; sound : SoundKind = SoundKind GENERIC_ACTION; is_craftbook_only : bool = false; in_craftbook : bool = true)
-    assert(!is_craftbook_only || in_craftbook)
+    _assert(!is_craftbook_only || in_craftbook)
     var rule : CraftRule
     rule.ground_tile_before = ground_tile_before
     rule.carry_tile_before = carry_tile_before
@@ -2146,11 +2195,11 @@ def register_all_craft_rules()
 	register_craft_rule(TileKind STOVE_WITH_COAL, TileKind FLINT_STONE, TileKind STOVE_WITH_COAL_FIRED, TileKind FLINT_STONE)
 	register_craft_rule_craftbook_only(TileKind STOVE_WITH_COAL_FIRED, TileKind FLOUR, TileKind STOVE_WITH_COAL_FIRED, TileKind BREAD_6)
 	register_craft_rule(TileKind WHEAT_COLLECTED_6, TileKind STONE, TileKind FLOUR, TileKind STONE)
-	register_craft_rule_craftbook_only(TileKind CAMPFIRE, TileKind BUCKET_WITH_WATER, TileKind CAMPFIRE_NO_WOOD, TileKind BUCKET_EMPTY)
-	register_craft_rule_craftbook_only(TileKind STOVE_WITH_COAL_FIRED, TileKind BUCKET_WITH_WATER, TileKind STOVE_WITH_COAL, TileKind BUCKET_EMPTY)
-	register_craft_rule_craftbook_only(TileKind DECAL_PREPARED_SOIL, TileKind BUCKET_WITH_WATER, TileKind DECAL_PREPARED_AND_WATERED_SOIL, TileKind BUCKET_EMPTY, SoundKind DROP_WATER)
+//	register_craft_rule_craftbook_only(TileKind CAMPFIRE, TileKind BUCKET_WITH_WATER, TileKind CAMPFIRE_NO_WOOD, TileKind BUCKET_EMPTY)
+//	register_craft_rule_craftbook_only(TileKind STOVE_WITH_COAL_FIRED, TileKind BUCKET_WITH_WATER, TileKind STOVE_WITH_COAL, TileKind BUCKET_EMPTY)
+//	register_craft_rule_craftbook_only(TileKind DECAL_PREPARED_SOIL, TileKind BUCKET_WITH_WATER, TileKind DECAL_PREPARED_AND_WATERED_SOIL, TileKind BUCKET_EMPTY, SoundKind DROP_WATER)
 	
-	register_craft_rule_craftbook_only(TileKind WATER, TileKind BUCKET_EMPTY, TileKind WATER, TileKind BUCKET_WITH_WATER)
+//	register_craft_rule_craftbook_only(TileKind WATER, TileKind BUCKET_EMPTY, TileKind WATER, TileKind BUCKET_WITH_WATER)
 	register_craft_rule_craftbook_only(TileKind WATER, TileKind WOOD, TileKind WOODEN_PLANE, TileKind NONE)
 	register_craft_rule_craftbook_only(TileKind DECAL_PREPARED_SOIL, TileKind WHEAT_COLLECTED_1, TileKind PLANTED_SEEDS, TileKind NONE)
 	//register_craft_rule_craftbook_only(TileKind WHEAT_COLLECTED_2, TileKind WHEAT_COLLECTED_2, TileKind NONE, TileKind WHEAT_COLLECTED_4)
@@ -2202,7 +2251,7 @@ def get_highlight_kind(kind : TileKind) : TileKind
         return TileKind SHEEP_HIGHLIGHT
     elif kind == TileKind SHEEP_SHEARED
         return TileKind SHEEP_SHEARED_HIGHLIGHT
-    assert(false)
+    _assert(false)
     return TileKind NONE
 
 def clear_alt_action_highlight()
@@ -2283,7 +2332,7 @@ def can_make_dialog(character : AiCharacter) : bool
 
 def make_tutorial_dialog(character : AiCharacter?; character_lines : array<string>; player_lines : array<string>) : TutorialDialogState?
     if current_dialog != null
-        assert(false)
+        _assert(false)
         return null
 
     var dialog = new TutorialDialogState()
@@ -2296,7 +2345,7 @@ def make_tutorial_dialog(character : AiCharacter?; character_lines : array<strin
 
 def make_dialog(character : AiCharacter?) : DialogState?
     if current_dialog != null
-        assert(false)
+        _assert(false)
         return null
 
     var dialog = new DialogState()
@@ -2320,7 +2369,7 @@ def get_bread_from_count(count : int) : TileKind
         return TileKind BREAD_5
     if count == 6
         return TileKind BREAD_6
-    assert(false)
+    _assert(false)
     return TileKind NONE
 
 def _alt_action(var character : Character; _at_pos : int2; exec : bool) : AltActionResult
@@ -2376,7 +2425,7 @@ def _alt_action(var character : Character; _at_pos : int2; exec : bool; hint : A
                     play_sound(SoundKind SHEAR_SHEEP, npc.position)
                     npc.kind = TileKind SHEEP_SHEARED
                     var tile = grid_items->getTileInt(shearing_wool_pos)
-                    assert(tile.kind == TileKind NONE)
+                    _assert(tile.kind == TileKind NONE)
                     tile.kind = TileKind WOOL
                     npc.saved_float = world_state.day_float
                     grid_items->setTile(tile)
@@ -2518,7 +2567,7 @@ def handle_anim_finished(var ch : Character)
         if item.kind == TileKind BED_OCCUPIED
             item.kind = TileKind BED
         else
-            assert(false)
+            _assert(false)
         grid_items->setTile(item)
         ch.position = float2(item.position) + float2(0.0, -0.3)
         ch.health = min(1.0, ch.health + health_per_sleep_in_bed)
@@ -2672,7 +2721,7 @@ def update_pause_menu(with_input : bool)
         push(pause_menu.options_str, "SAVE")
         push(pause_menu.options_str, "LOAD")
         push(pause_menu.options_str, "QUIT")
-        pause_menu.footer_str = "[wasd] move\n[space] action\n[f6] quicksave\n[f7] load quicksave"
+        pause_menu.footer_str = "[wasd] move\n[space] interact\n[f6] quicksave\n[f7] load quicksave"
     elif pause_menu.kind == PauseMenuStateKind QUIT
         pause_menu.header_str = "DO YOU REALLY WANT TO QUIT?"
         push(pause_menu.options_str, "NO")
@@ -2744,7 +2793,7 @@ def update_pause_menu(with_input : bool)
         push(pause_menu.options_str, "NEW GAME")
         push(pause_menu.options_str, "LOAD")
         push(pause_menu.options_str, "QUIT")
-        pause_menu.footer_str = "[wasd] move\n[space] action\n[f6] quicksave\n[f7] load quicksave"
+        pause_menu.footer_str = "[wasd] move\n[space] interact\n[f6] quicksave\n[f7] load quicksave"
 
 
     var prev_sel = pause_menu.idx_selected
@@ -2791,7 +2840,7 @@ def update_pause_menu(with_input : bool)
         elif pause_menu.idx_selected == 5
             pause_menu.kind = PauseMenuStateKind QUIT
         else
-            assert(false)
+            _assert(false)
         pause_menu.idx_selected = 0
         return
     elif pause_menu.kind == PauseMenuStateKind QUIT
@@ -2837,7 +2886,7 @@ def update_pause_menu(with_input : bool)
             pause_menu.kind = PauseMenuStateKind QUIT
             pause_menu.idx_selected = 0
         else
-            assert(false)
+            _assert(false)
     elif pause_menu.kind == PauseMenuStateKind RESTART
         if pause_menu.idx_selected == 0
             pause_menu.kind = pause_menu.is_death ? PauseMenuStateKind DEATH : PauseMenuStateKind PAUSE
@@ -2901,13 +2950,13 @@ class TutorialMessageBox : SimpleGenericMenu
     ff : int
 
 def show_tutorial_msg(msg : string)
-    assert(ui_tutorial == null)
+    _assert(ui_tutorial == null)
     ui_tutorial = new TutorialMessageBox()
     ui_tutorial.header_str = msg
     push(ui_tutorial.options_str, "CONTINUE")
 
 def show_tutorial_msgs(msgs : array<string>)
-    assert(ui_tutorial == null)
+    _assert(ui_tutorial == null)
     ui_tutorial = new TutorialMessageBox()
 
     var combined_msg = ""
@@ -2944,6 +2993,10 @@ def spawn_new_villager()
     if is_human(new_character.kind)
         new_character.name = all_human_names[world_state.next_free_human_name]
         world_state.next_free_human_name = (world_state.next_free_human_name + 1) % length(all_human_names)
+
+    new_character.anim.kind = AnimKind CHAR_JOINED
+    new_character.anim.t = 0.0
+    new_character.anim.stopT = 0.5
 
     push(characters, new_character)
     push(aiCharacters, new_character)
@@ -3046,7 +3099,7 @@ def act(_dt: float)
         world_state.good_health_and_no_hunger_duration += dt
     else
         world_state.good_health_and_no_hunger_duration = max(0.0, world_state.good_health_and_no_hunger_duration - dt * good_health_and_no_hunger_to_new_human_decrease_speed)
-    if world_state.good_health_and_no_hunger_duration >= good_health_and_no_hunger_to_new_human_duration
+    if world_state.good_health_and_no_hunger_duration >= good_health_and_no_hunger_to_new_human_duration && is_tutorial_finished()
         world_state.good_health_and_no_hunger_duration = 0.0
 
         spawn_new_villager()
@@ -3588,7 +3641,7 @@ def get_cloth_tile(character : TileKind) : TileKind
         return TileKind CHILD_B_CLOTH
     if character == TileKind HUMAN_ON_HORSE
         return TileKind HUMAN_ON_HORSE_CLOTH
-    assert(false)
+    _assert(false)
     return TileKind NONE
 
 def processCollisionCircle(var deltaPos : float2&; radius : float; center : float2)
@@ -3723,6 +3776,12 @@ def apply_anim(anim : Anim; var pos : float2&; var size : float2&; var angle : f
             var text_color = lerp_colors_fix(0xffffffff, 0x00ffffff, t)
             text_color = lerp_colors_fix(0x00ffffff, text_color, t*10.0)
             text_out(clip_space_pos.x,clip_space_pos.y, "z", text_color)
+    elif anim.kind == AnimKind CHAR_JOINED
+        var t = saturate(anim.t / anim.stopT)
+        //angle = sin(t * PI * 2.0 * 1.0) * 0.2
+        size *= (1.0 + sin(t * PI) * 0.3)
+        var tmid = (t - 0.5) * 2.0
+        pos.y += (1.0 - tmid * tmid) * 1.2
 
 
     
@@ -3919,7 +3978,7 @@ def get_flag_color(kind : TileKind) : uint
     elif kind == TileKind BLUE_FLAG
         return 0xff0000ff
     else
-        assert(false)
+        _assert(false)
         return 0xffffffff
 
 def draw_tile(tile : TileFloat)
@@ -4080,7 +4139,7 @@ def draw_character(character : Character?)
     add_to_draw_queue(tile, 0)
     if character.is_highlighted
         var high = tile
-        high.color = 0x30ffffff
+        high.color = 0x60ffffff
         high.kind = get_highlight_kind(tile.kind)
         add_to_draw_queue(high, 0, -2)
     if character.is_wearing_cloth
@@ -4372,6 +4431,7 @@ def dialog_first_action_readable(action : DialogFirstAction) : string
 
 class DialogStateGeneric
     character : AiCharacter?
+    show_char_name : bool = true
 
     i_current_option : int = 1
     ui_message : string
@@ -4388,8 +4448,8 @@ class TutorialDialogState : DialogStateGeneric
     player_lines : array<string>
 
     def override update() : bool
-        assert(current_line_idx < length(character_lines))
-        assert(length(player_lines) == length(character_lines))
+        _assert(current_line_idx < length(character_lines))
+        _assert(length(player_lines) == length(character_lines))
 
         clear(ui_options)
         i_current_option = 0
@@ -4462,7 +4522,7 @@ def ai_command_to_str(command : AiCommand)
     elif command.kind == AiCommandKind MAKE_BREAD
         return "I MAKE BREAD"
 
-    assert(false)
+    _assert(false)
     return "SOMETHING IMPORTANT"
 
 
@@ -4486,13 +4546,13 @@ def ai_command_from_dialog(dialog : DialogState) : AiCommand
             cmd.kind = AiCommandKind MAKE_BREAD
             return cmd
     elif dialog.first_action == DialogFirstAction PLOW
-        assert(dialog.first_action_tile_kind == TileKind SOIL)
+        _assert(dialog.first_action_tile_kind == TileKind SOIL)
         return ai_command_plow_ground()
     elif dialog.first_action == DialogFirstAction PLANT
         return ai_command_plant_wheat()
         
             
-    assert(false)
+    _assert(false)
     var command : AiCommand
     return command
 
@@ -4625,7 +4685,7 @@ def update_dialog(var dialog_state : DialogState) : bool
                     if dialog_state.tutorial_make_campfire_only && e != TileKind STONE
                         push(dialog_state.ui_blocked_options, "{readable_tile_name(e)}")
         else
-            assert(dialog_state.first_action == DialogFirstAction BRING)
+            _assert(dialog_state.first_action == DialogFirstAction BRING)
             for e in bringtoable_flags
                 if e != dialog_state.first_action_tile_kind
                     push(dialog_state.ui_options, "{readable_tile_name(e)}")
@@ -4641,8 +4701,9 @@ def update_dialog(var dialog_state : DialogState) : bool
         pass
 
     //elif dialog_state.first_action_tile_kind
-
+    dialog_state.show_char_name = true
     if dialog_state.first_action != DialogFirstAction NONE
+        dialog_state.show_char_name = false
         dialog_state.ui_message += "{dialog_state.first_action}"
     if dialog_state.first_action_tile_kind != TileKind NONE
         dialog_state.ui_message += " {readable_tile_name(dialog_state.first_action_tile_kind)}"
@@ -4670,7 +4731,7 @@ def update_dialog(var dialog_state : DialogState) : bool
                 dialog_state.ui_message = "WHAT SHOULD I DO?"
 
     if dialog_state.ui_message == ""
-        assert(false)
+        _assert(false)
         dialog_state.ui_message = "???"
     
     var tried_to_move = false
@@ -4737,7 +4798,7 @@ def update_dialog(var dialog_state : DialogState) : bool
                             dialog_state.second_action_tile_kind = e
                         idx++
             else
-                assert(dialog_state.first_action == DialogFirstAction BRING)
+                _assert(dialog_state.first_action == DialogFirstAction BRING)
                 for e in bringtoable_flags
                     if dialog_state.i_current_option == idx
                         dialog_state.second_action_tile_kind = e
@@ -4781,7 +4842,9 @@ def draw_rain()
 
 def ui_draw_dialog(var dialog_state : DialogStateGeneric)
     var main_text_pos = int2(get_screen_width() / 2, get_screen_height() - 300)
-    var msg = dialog_state.character.name + ": " + dialog_state.ui_message
+    var msg = dialog_state.ui_message
+    if dialog_state.show_char_name
+        msg = dialog_state.character.name + ": " + msg 
     main_text_pos.x -= int(get_text_size(msg).x / 2.0)
     text_out(main_text_pos.x,main_text_pos.y, msg, 0xffffffff)
     

@@ -116,6 +116,7 @@ enum AnimKind
     SLEEP
     SLEEP_IN_BED
     APPEAR_FROM_CHEST
+    CHAR_JOINED
 
 struct Anim
     kind : AnimKind
